@@ -1,4 +1,9 @@
 const STAY = "6–8 ноября, 2 ночи, 2 взрослых";
+const VERIFIED_TUTU_AUTHOR = {
+  id: "c0f3d04374304e9984003b6f448641f5",
+  name: "Проверено Туту",
+  avatar: "assets/brand/verified-tutu-avatar.jpg",
+};
 
 const DEFAULT_FEED = [
   {
@@ -70,10 +75,16 @@ const DEFAULT_FEED = [
     text: "Красота Камчатки. Короткий ролик про Петропавловск-Камчатский, длинного текста автора нет. Отель ниже — первый в выдаче города на эти даты.",
     offers: [hotel("Гостиница «Авача»", "15865 ₽ за 2 ночи", "Петропавловск-Камчатский, Камчатский край. 3 звезды. Бесплатная отмена. Завтрак Туту не указал.", "https://cdn4.tu-tu.ru/static/hotels-photo/hotels-photo/1e77895e80a811bc0753553e80aa952e2bd25dc6.4c4767480f538efdd3b05e53487af64cc8278913.jpeg", "https://hotel.tutu.ru/offers/details?business=0&check_in=2026-11-06&check_out=2026-11-08&geo_id=11443544&geo_name=%D0%9F%D0%B5%D1%82%D1%80%D0%BE%D0%BF%D0%B0%D0%B2%D0%BB%D0%BE%D0%B2%D1%81%D0%BA-%D0%9A%D0%B0%D0%BC%D1%87%D0%B0%D1%82%D1%81%D0%BA%D0%B8%D0%B9&room%5B0%5D=2&search_id=18e61b183075bcc72cdca3b54158e741")],
   },
-];
+].map((item) => ({
+  ...item,
+  streamerId: VERIFIED_TUTU_AUTHOR.id,
+  streamerName: VERIFIED_TUTU_AUTHOR.name,
+  streamerAvatar: VERIFIED_TUTU_AUTHOR.avatar,
+}));
 
 function hotel(title, price, detail, image, href) {
   return {
+    type: "hotel",
     title: title,
     price: price,
     label: title + ". " + STAY + ". " + detail + " Цена — итог за весь срок, снимок поиска 20 октября.",

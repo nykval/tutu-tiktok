@@ -8,7 +8,6 @@ const sourceFilter = document.getElementById("filter-source");
 const categoryFilter = document.getElementById("filter-category");
 const streamerFilter = document.getElementById("filter-streamer");
 const productFilter = document.getElementById("filter-product");
-const tagFilter = document.getElementById("filter-tag");
 const tagInput = document.getElementById("video-tags");
 const tagChipList = document.getElementById("video-tag-chips");
 const tagEditor = document.getElementById("tag-editor");
@@ -16,7 +15,6 @@ const posterInput = document.getElementById("video-poster");
 const posterPreviewImage = document.getElementById("poster-preview-image");
 const posterPreviewEmpty = document.getElementById("poster-preview-empty");
 const posterRemoveButton = document.getElementById("poster-remove");
-const sortBy = document.getElementById("sort-by");
 const clearFiltersButton = document.getElementById("clear-filters");
 const activeFiltersCount = document.getElementById("filter-active-count");
 let editing = null;
@@ -286,7 +284,6 @@ function render() {
   productFilter.replaceChildren(new Option("Все товары", "all"), ...(state.products || []).map((item) => new Option(`${item.sku} · ${item.title}`, item.id)));
   productFilter.value = [...productFilter.options].some((item) => item.value === previousProduct) ? previousProduct : "all";
   const query = search.value.trim().toLocaleLowerCase("ru");
-  const tag = tagFilter.value.trim().toLocaleLowerCase("ru");
   const filtered = videos.filter((item) => {
     const searchable = `${item.id} ${item.title} ${item.text} ${(item.tags || []).join(" ")} ${(item.offers || []).map((offer) => offer.title).join(" ")}`.toLocaleLowerCase("ru");
     return searchable.includes(query)
@@ -294,30 +291,20 @@ function render() {
       && (sourceFilter.value === "all" || item.source === sourceFilter.value)
       && (categoryFilter.value === "all" || item.category === categoryFilter.value)
       && (streamerFilter.value === "all" || item.streamerId === streamerFilter.value)
-      && (productFilter.value === "all" || (item.offers || []).some((offer) => offer.productId === productFilter.value))
-      && (!tag || (item.tags || []).some((value) => value.toLocaleLowerCase("ru").includes(tag)));
+      && (productFilter.value === "all" || (item.offers || []).some((offer) => offer.productId === productFilter.value));
   });
-  const sortMode = sortBy.value;
-  if (sortMode === "order-reverse") filtered.reverse();
-  else if (sortMode !== "order") {
-    const [field, direction] = sortMode.split("-");
-    const multiplier = direction === "desc" ? -1 : 1;
-    filtered.sort((a, b) => String(a[field] || "").localeCompare(String(b[field] || ""), "ru") * multiplier);
-  }
   grid.replaceChildren(...filtered.map(renderCard));
   document.getElementById("video-count").textContent = String(videos.length);
   document.getElementById("result-count").textContent = `Показано ${filtered.length} из ${videos.length}`;
   document.getElementById("empty-state").hidden = filtered.length > 0;
   const activeFilters = [statusFilter, sourceFilter, categoryFilter, streamerFilter, productFilter].filter((control) => control.value !== "all").length
-    + Number(!!tag) + Number(sortMode !== "order") + Number(!!query);
+    + Number(!!query);
   activeFiltersCount.textContent = String(activeFilters);
   activeFiltersCount.hidden = activeFilters === 0;
   clearFiltersButton.disabled = activeFilters === 0;
   for (const control of [statusFilter, sourceFilter, categoryFilter, streamerFilter, productFilter]) {
     control.closest(".filter-field").classList.toggle("is-active", control.value !== "all");
   }
-  tagFilter.closest(".filter-field").classList.toggle("is-active", !!tag);
-  sortBy.closest(".filter-field").classList.toggle("is-active", sortMode !== "order");
   document.querySelectorAll("#video-section select").forEach((select) => select.updateCustomSelect?.());
 }
 
@@ -328,8 +315,6 @@ function clearFilters() {
   categoryFilter.value = "all";
   streamerFilter.value = "all";
   productFilter.value = "all";
-  tagFilter.value = "";
-  sortBy.value = "order";
   render();
 }
 
@@ -446,7 +431,9 @@ function openForm(item = null) {
   document.getElementById("dialog-title").textContent = item ? "Редактировать видео" : "Добавить видео";
   document.getElementById("dialog-eyebrow").textContent = item ? "ПАРАМЕТРЫ ВИДЕО" : "НОВЫЙ КОНТЕНТ";
   document.getElementById("dialog-intro").textContent = item ? `ID: ${item.id} · Источник: ${item.source === "upload" ? "файл" : "Кинескоп"}` : "Добавьте ролик из Кинескопа или загрузите файл на локальный сервер.";
-  document.getElementById("save-button").querySelector(".button-label").textContent = item ? "Сохранить изменения" : "Добавить в ленту";
+  const saveButton = document.getElementById("save-button");
+  saveButton.querySelector(".button-label").textContent = item ? "Сохранить изменения" : "Добавить в ленту";
+  saveButton.querySelector(".icon-plus").hidden = !!item;
   if (item) {
     form.querySelector(`[name="source"][value="${item.source}"]`).checked = true;
     if (item.source === "kinescope") {
@@ -472,6 +459,7 @@ function openForm(item = null) {
   showSource();
   document.querySelectorAll("#video-dialog select").forEach((select) => select.updateCustomSelect?.());
   dialog.showModal();
+  dialog.querySelector(".dialog-body").scrollTop = 0;
   syncModalScroll();
 }
 
@@ -616,8 +604,7 @@ dialog.addEventListener("close", () => {
   syncModalScroll();
 });
 search.addEventListener("input", render);
-for (const control of [statusFilter, sourceFilter, categoryFilter, streamerFilter, productFilter, sortBy]) control.addEventListener("change", render);
-tagFilter.addEventListener("input", render);
+for (const control of [statusFilter, sourceFilter, categoryFilter, streamerFilter, productFilter]) control.addEventListener("change", render);
 clearFiltersButton.addEventListener("click", clearFilters);
 document.getElementById("empty-clear").addEventListener("click", clearFilters);
 document.getElementById("preview-close").addEventListener("click", () => previewDialog.close());

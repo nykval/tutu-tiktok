@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="admin.css?v=33">
+  <link rel="stylesheet" href="admin.css?v=35">
 </head>
 <body>
   <div class="app-shell">
@@ -50,8 +50,6 @@
               <label class="filter-field">Категория<select id="filter-category"><option value="all">Все категории</option><option value="hotels">Отели</option><option value="transport">Транспорт</option><option value="cars">Автомобили</option><option value="tours">Туры</option><option value="other">Другое</option></select></label>
               <label class="filter-field">Автор<select id="filter-streamer"><option value="all">Все авторы</option></select></label>
               <label class="filter-field">Товар<select id="filter-product"><option value="all">Все товары</option></select></label>
-              <label class="filter-field">Тег<input id="filter-tag" type="search" placeholder="Например, Москва"></label>
-              <label class="filter-field">Сортировка<select id="sort-by" aria-label="Сортировка"><option value="order">Порядок в ленте</option><option value="order-reverse">Обратный порядок</option><option value="title-asc">Название: А → Я</option><option value="title-desc">Название: Я → А</option></select></label>
             </div>
           </div>
         </div>
@@ -65,25 +63,37 @@
 
   <dialog id="video-dialog" class="video-dialog">
     <form id="video-form" method="dialog">
-      <div class="dialog-head"><div><span class="section-label" id="dialog-eyebrow">НОВЫЙ КОНТЕНТ</span><h2 id="dialog-title">Добавить видео</h2></div><button type="button" class="icon-close" id="dialog-close" aria-label="Закрыть"><span class="ui-icon icon-cross" aria-hidden="true"></span></button></div>
-      <p class="dialog-intro" id="dialog-intro">Добавьте ролик из Кинескопа или загрузите файл на локальный сервер.</p>
+      <div class="dialog-header">
+        <div class="dialog-head"><div><span class="section-label" id="dialog-eyebrow">НОВЫЙ КОНТЕНТ</span><h2 id="dialog-title">Добавить видео</h2></div><button type="button" class="icon-close" id="dialog-close" aria-label="Закрыть"><span class="ui-icon icon-cross" aria-hidden="true"></span></button></div>
+        <p class="dialog-intro" id="dialog-intro">Добавьте ролик из Кинескопа или загрузите файл на локальный сервер.</p>
+      </div>
+      <div class="dialog-body">
+      <section class="entity-form-group video-form-group"><h3>Источник</h3><p>Ссылка на Кинескоп или локальный видеофайл.</p>
       <fieldset class="source-tabs" id="source-tabs"><legend class="sr-only">Источник видео</legend><label><input type="radio" name="source" value="kinescope" checked><span><i class="ui-icon icon-link" aria-hidden="true"></i>Ссылка Кинескопа</span></label><label><input type="radio" name="source" value="upload"><span><i class="ui-icon icon-upload" aria-hidden="true"></i>Загрузить файл</span></label></fieldset>
       <div id="kinescope-field" class="field"><label for="kinescope-url">Ссылка на видео в Кинескопе <b id="kinescope-required">*</b></label><input id="kinescope-url" name="kinescopeUrl" type="text" placeholder="https://kinescope.io/…" autocomplete="off"><div class="kinescope-field-footer"><small id="kinescope-help">Подойдёт ссылка на ролик или его короткий ID.</small><a id="kinescope-open" class="source-link" target="_blank" rel="noopener noreferrer" hidden><i class="ui-icon icon-link" aria-hidden="true"></i>Открыть в Кинескопе</a></div></div>
-      <div id="upload-field" class="field" hidden><label for="video-file">Видеофайл <b>*</b></label><input id="video-file" name="videoFile" type="file" accept="video/mp4,video/webm,.mp4,.webm"><small>MP4 или WebM, до 150 МБ. Файл хранится только на этом компьютере.</small></div>
+      <div id="upload-field" class="field" hidden><label for="video-file">Видеофайл <b>*</b></label><input id="video-file" name="videoFile" type="file" accept="video/mp4,video/webm,.mp4,.webm"><small>Файл хранится только на этом компьютере.</small></div>
+      </section>
+      <section class="entity-form-group video-form-group"><h3>О ролике</h3><p>Название, описание и данные для поиска.</p>
       <div class="field"><label for="video-title">Название <b>*</b></label><input id="video-title" name="title" maxlength="120" required placeholder="Например, Выходные в Казани"></div>
       <div class="field"><label for="video-text">Описание</label><textarea id="video-text" name="text" maxlength="1000" rows="3" placeholder="Короткая подпись под роликом"></textarea></div>
       <div class="form-two-columns"><div class="field"><label for="video-category">Категория</label><select id="video-category" name="category"><option value="">Без категории</option><option value="hotels">Отели</option><option value="transport">Транспорт</option><option value="cars">Автомобили</option><option value="tours">Туры</option><option value="other">Другое</option></select></div><div class="field"><label for="video-streamer">Автор</label><select id="video-streamer" name="streamerId"><option value="">Не выбран</option></select></div></div>
       <div class="field"><label for="video-tags">Теги</label><div class="tag-editor" id="tag-editor"><div class="tag-chips" id="video-tag-chips" aria-live="polite"></div><input id="video-tags" type="text" placeholder="Введите тег" autocomplete="off" aria-describedby="video-tags-help"></div><small id="video-tags-help">Enter или запятая — добавить тег. До 10 тегов, каждый не длиннее 40 символов.</small></div>
+      </section>
+      <section class="entity-form-group video-form-group"><h3>Обложка</h3><p>Своё изображение для карточки видео.</p>
       <div class="field poster-field"><span class="poster-field-label">Постер</span><div class="poster-picker"><div class="poster-preview"><img id="poster-preview-image" alt="Предпросмотр постера" hidden><span id="poster-preview-empty" class="poster-preview-empty"><i class="ui-icon icon-picture" aria-hidden="true"></i><span>Нет постера</span></span></div><div class="poster-picker-content"><strong id="poster-status">Постер не выбран</strong><p id="poster-hint">Можно добавить свою обложку для видео.</p><div class="poster-actions"><button id="poster-choose" class="outline-button poster-choose" type="button"><i class="ui-icon icon-upload" aria-hidden="true"></i><span id="poster-choose-label">Выбрать постер</span></button><button id="poster-remove" class="poster-remove" type="button" hidden><i class="ui-icon icon-trash" aria-hidden="true"></i><span>Убрать постер</span></button></div><small>PNG, JPEG или WebP · до 10 МБ</small></div></div><input id="video-poster" name="posterFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div>
-      <div class="offer-fields"><div class="offer-heading"><strong>Офферы</strong><span>Необязательно · до двух карточек</span></div><div class="field"><label for="offer-product">Товар из каталога</label><select id="offer-product" name="offerProduct"><option value="">Без привязки</option></select></div><div class="offer-row"><div class="field"><label for="offer-title">Название</label><input id="offer-title" name="offerTitle" maxlength="100" placeholder="Отель или билет"></div><div class="field"><label for="offer-price">Цена</label><input id="offer-price" name="offerPrice" maxlength="80" placeholder="от 4 500 ₽"></div></div><div class="field"><label for="offer-url">Ссылка на Туту</label><input id="offer-url" name="offerUrl" type="url" placeholder="https://hotel.tutu.ru/…"></div><details class="second-offer" id="second-offer"><summary>Добавить второй оффер</summary><div class="field"><label for="offer-product-2">Товар из каталога</label><select id="offer-product-2" name="offerProduct2"><option value="">Без привязки</option></select></div><div class="offer-row"><div class="field"><label for="offer-title-2">Название</label><input id="offer-title-2" name="offerTitle2" maxlength="100"></div><div class="field"><label for="offer-price-2">Цена</label><input id="offer-price-2" name="offerPrice2" maxlength="80"></div></div><div class="field"><label for="offer-url-2">Ссылка на Туту</label><input id="offer-url-2" name="offerUrl2" type="url" placeholder="https://…"></div></details></div>
+      </section>
+      <section class="entity-form-group video-form-group"><h3>Офферы</h3><p>Необязательно · до двух карточек.</p>
+      <div class="offer-fields"><div class="field"><label for="offer-product">Товар из каталога</label><select id="offer-product" name="offerProduct"><option value="">Без привязки</option></select></div><div class="offer-row"><div class="field"><label for="offer-title">Название</label><input id="offer-title" name="offerTitle" maxlength="100" placeholder="Отель или билет"></div><div class="field"><label for="offer-price">Цена</label><input id="offer-price" name="offerPrice" maxlength="80" placeholder="от 4 500 ₽"></div></div><div class="field"><label for="offer-url">Ссылка на Туту</label><input id="offer-url" name="offerUrl" type="url" placeholder="https://hotel.tutu.ru/…"></div><details class="second-offer" id="second-offer"><summary>Добавить второй оффер</summary><div class="field"><label for="offer-product-2">Товар из каталога</label><select id="offer-product-2" name="offerProduct2"><option value="">Без привязки</option></select></div><div class="offer-row"><div class="field"><label for="offer-title-2">Название</label><input id="offer-title-2" name="offerTitle2" maxlength="100"></div><div class="field"><label for="offer-price-2">Цена</label><input id="offer-price-2" name="offerPrice2" maxlength="80"></div></div><div class="field"><label for="offer-url-2">Ссылка на Туту</label><input id="offer-url-2" name="offerUrl2" type="url" placeholder="https://…"></div></details></div>
+      </section>
       <p id="form-error" class="form-error" role="alert" hidden></p>
+      </div>
       <div class="dialog-actions"><button type="button" class="text-button" id="dialog-cancel">Отмена</button><button type="submit" class="primary-button" id="save-button"><span class="ui-icon icon-plus" aria-hidden="true"></span><span class="button-label">Добавить в ленту</span></button></div>
     </form>
   </dialog>
   <dialog id="preview-dialog" class="preview-dialog" aria-labelledby="preview-title"><h2 id="preview-title" class="sr-only">Видео</h2><div id="preview-body" class="preview-body"></div><button id="preview-close" class="preview-close" type="button" aria-label="Закрыть предпросмотр"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
-  <script src="feed-data.js?v=1"></script>
-  <script src="admin.js?v=22"></script>
-  <script src="admin-sections.js?v=12"></script>
+  <script src="feed-data.js?v=3"></script>
+  <script src="admin.js?v=24"></script>
+  <script src="admin-sections.js?v=15"></script>
 </body>
 </html>

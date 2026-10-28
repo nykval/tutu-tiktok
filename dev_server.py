@@ -68,7 +68,7 @@ def enriched_video(video, products, streamers):
         if product:
             price = product["salePrice"] if product["salePrice"] is not None else product["price"]
             formatted = f"{price:g}".replace(".", ",") + " " + product["currency"]
-            result["offers"].append({**offer, "title": product["title"], "price": formatted,
+            result["offers"].append({**offer, "title": product["title"], "price": formatted, "type": product["type"],
                                      "label": product["description"] or product["title"],
                                      "image": product["imageUrl"] or None, "href": product["url"]})
         else:

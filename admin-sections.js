@@ -225,27 +225,109 @@ const FORM_FIELDS = {
   ],
 };
 
+const FORM_GROUPS = {
+  streamers: [
+    ["Основное", "Имя, контакт и описание автора.", ["name", "email", "phone", "description"]],
+    ["Аватар", "Добавьте ссылку или загрузите изображение.", ["avatarUrl", "imageFile"]],
+    ["Профиль", "Дополнительные данные автора.", ["externalId", "profileUrl"]],
+  ],
+  products: [
+    ["Основное", "Данные для каталога и карточки товара.", ["sku", "title", "type", "active"]],
+    ["Стоимость", "Цена, которую увидят в карточке.", ["currency", "price", "salePrice"]],
+    ["Ссылки и изображение", "Страница товара и обложка для оффера.", ["url", "imageUrl", "imageFile"]],
+    ["Описание", "Необязательная информация о товаре.", ["description", "brand", "usage"]],
+  ],
+  recordings: [
+    ["Основное", "Название и описание записи.", ["title", "description", "active"]],
+    ["Видео", "Ссылка на запись или локальный файл.", ["videoUrl", "videoFile"]],
+  ],
+};
+
+const FIELD_HINTS = {
+  name: "Например, Анна Иванова", email: "name@example.com", phone: "+7 (999) 000-00-00",
+  description: "Краткое описание", avatarUrl: "https://…", externalId: "ID во внешней системе",
+  profileUrl: "https://…", sku: "Артикул товара", title: "Название товара",
+  url: "https://hotel.tutu.ru/…", imageUrl: "https://…", brand: "Информация о бренде",
+  usage: "Как использовать товар", videoUrl: "https://…",
+};
+
+let entityPreviewUrl = null;
+function releaseEntityPreview() {
+  if (entityPreviewUrl) URL.revokeObjectURL(entityPreviewUrl);
+  entityPreviewUrl = null;
+}
+
+function enhanceFileInput(control, { title, hint, currentImage = () => "" }) {
+  const picker = node("div", "file-picker");
+  const preview = node("span", "file-picker-preview");
+  const image = node("img");
+  image.alt = "";
+  const icon = sectionIcon(control.accept.startsWith("video/") ? "video-camera" : "picture", 22);
+  preview.append(image, icon);
+  const copy = node("div", "file-picker-copy");
+  const heading = node("strong", "", title);
+  const status = node("span", "file-picker-status");
+  status.setAttribute("aria-live", "polite");
+  copy.append(heading, status, node("small", "", hint));
+  const choose = actionButton("Выбрать файл", "upload", () => control.click(), "outline-button file-picker-button");
+  control.classList.add("file-picker-input");
+  control.before(picker);
+  picker.append(preview, copy, choose, control);
+  const update = () => {
+    const file = control.files[0];
+    const imageUrl = currentImage();
+    if (control.closest("#entity-dialog")) releaseEntityPreview();
+    if (file && file.type.startsWith("image/") && control.closest("#entity-dialog")) {
+      entityPreviewUrl = URL.createObjectURL(file);
+      image.src = entityPreviewUrl;
+    } else if (file && file.type.startsWith("image/")) image.src = URL.createObjectURL(file);
+    else if (imageUrl) image.src = imageUrl;
+    else image.removeAttribute("src");
+    preview.classList.toggle("has-image", !!image.getAttribute("src"));
+    status.textContent = file ? file.name : imageUrl ? "Изображение по ссылке" : "Файл не выбран";
+  };
+  image.addEventListener("error", () => preview.classList.remove("has-image"));
+  control.addEventListener("change", update);
+  update();
+  return update;
+}
+
+const videoFileInput = document.getElementById("video-file");
+if (videoFileInput) {
+  const syncVideoFile = enhanceFileInput(videoFileInput, { title: "Видеофайл", hint: "MP4 или WebM · до 150 МБ" });
+  document.getElementById("video-form").addEventListener("reset", () => queueMicrotask(syncVideoFile));
+}
+
 const entityDialog = node("dialog", "entity-dialog");
 entityDialog.id = "entity-dialog";
-entityDialog.innerHTML = '<form id="entity-form"><div class="dialog-head"><div><h2 id="entity-dialog-title"></h2></div><button class="icon-close" type="button" id="entity-close" aria-label="Закрыть"><i class="ui-icon icon-cross" aria-hidden="true"></i></button></div><p class="dialog-intro" id="entity-intro"></p><div id="entity-fields"></div><p class="form-error" id="entity-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="text-button" id="entity-cancel">Отмена</button><button type="submit" class="primary-button" id="entity-save"><i class="ui-icon icon-check" aria-hidden="true"></i>Сохранить</button></div></form>';
+entityDialog.innerHTML = '<form id="entity-form"><div class="dialog-header"><div class="dialog-head"><div><span class="section-label" id="entity-eyebrow"></span><h2 id="entity-dialog-title"></h2></div><button class="icon-close" type="button" id="entity-close" aria-label="Закрыть"><i class="ui-icon icon-cross" aria-hidden="true"></i></button></div><p class="dialog-intro" id="entity-intro"></p></div><div class="dialog-body"><div id="entity-fields"></div><p class="form-error" id="entity-error" role="alert" hidden></p></div><div class="dialog-actions"><button type="button" class="text-button" id="entity-cancel">Отмена</button><button type="submit" class="primary-button" id="entity-save"><i class="ui-icon icon-check" aria-hidden="true"></i>Сохранить</button></div></form>';
 document.body.append(entityDialog);
 const entityForm = document.getElementById("entity-form");
 document.getElementById("entity-close").addEventListener("click", () => entityDialog.close());
 document.getElementById("entity-cancel").addEventListener("click", () => entityDialog.close());
-entityDialog.addEventListener("close", () => window.syncModalScroll());
+entityDialog.addEventListener("close", () => { releaseEntityPreview(); window.syncModalScroll(); });
 
 function openEntityForm(kind, item = null) {
   entityEditing = item;
   entityForm.dataset.kind = kind;
   entityForm.reset();
+  releaseEntityPreview();
   document.getElementById("entity-error").hidden = true;
-  document.getElementById("entity-dialog-title").textContent = item ? `Редактировать: ${entityTitle(item)}` : SECTION_INFO[kind].add;
+  document.getElementById("entity-eyebrow").textContent = item ? "РЕДАКТИРОВАНИЕ" : "НОВАЯ ЗАПИСЬ";
+  document.getElementById("entity-dialog-title").textContent = item
+    ? `Редактировать ${kind === "streamers" ? "автора" : kind === "products" ? "товар" : "запись"}`
+    : SECTION_INFO[kind].add;
   document.getElementById("entity-intro").textContent = item ? "Изменения сохраняются в локальном хранилище проекта." : SECTION_INFO[kind].description;
   const container = document.getElementById("entity-fields");
   container.replaceChildren();
+  const fields = new Map();
+  const selects = [];
+  let imageLinkControl = null;
   for (const [key, title, type, required, choices] of FORM_FIELDS[kind]) {
     const field = node("div", type === "checkbox" ? "form-check" : "field");
-    const label = node("label", "", title + (required ? " *" : ""));
+    if (["description", "avatarUrl", "imageFile", "profileUrl", "title", "url", "imageUrl", "brand", "usage", "videoUrl", "videoFile", "active"].includes(key)) field.classList.add("field-wide");
+    const label = node("label", "", title);
+    if (required) label.append(node("span", "required-mark", " *"));
     label.htmlFor = `entity-${key}`;
     let control;
     if (type === "textarea") { control = node("textarea"); control.rows = 3; }
@@ -260,15 +342,32 @@ function openEntityForm(kind, item = null) {
       if (type === "video") control.accept = "video/mp4,video/webm";
       if (type === "number") { control.min = "0"; control.step = "0.01"; }
     }
+    if (FIELD_HINTS[key] && type !== "checkbox") control.placeholder = FIELD_HINTS[key];
     control.name = key;
     control.id = `entity-${key}`;
     control.required = !!required;
+    if (key === "avatarUrl" || key === "imageUrl") imageLinkControl = control;
     if (type === "checkbox") { field.append(control, label); control.checked = item ? !!item[key] : true; }
-    else { field.append(label, control); if (item && type !== "image" && type !== "video") control.value = item[key] ?? ""; }
-    container.append(field);
-    if (control.tagName === "SELECT") enhanceSelect(control);
+    else if (type === "image" || type === "video") {
+      field.append(label, control);
+      const updatePicker = enhanceFileInput(control, { title: type === "image" ? "Изображение" : "Видеофайл", hint: type === "image" ? "PNG, JPEG или WebP · до 10 МБ" : "MP4 или WebM · до 150 МБ", currentImage: () => type === "image" ? imageLinkControl?.value.trim() || "" : "" });
+      if (type === "image") imageLinkControl?.addEventListener("input", updatePicker);
+    } else { field.append(label, control); if (item) control.value = item[key] ?? ""; }
+    fields.set(key, field);
+    if (control.tagName === "SELECT") selects.push(control);
   }
+  for (const [heading, description, keys] of FORM_GROUPS[kind]) {
+    const group = node("section", "entity-form-group");
+    const title = node("h3", "", heading);
+    const detail = node("p", "", description);
+    const grid = node("div", "entity-field-grid");
+    keys.forEach((key) => grid.append(fields.get(key)));
+    group.append(title, detail, grid);
+    container.append(group);
+  }
+  selects.forEach(enhanceSelect);
   entityDialog.showModal();
+  entityDialog.querySelector(".dialog-body").scrollTop = 0;
   window.syncModalScroll();
 }
 
@@ -409,6 +508,20 @@ function enhanceSelect(select) {
   button.append(node("span", "select-value"), sectionIcon("angle-down"));
   const list = node("div", "select-options"); list.setAttribute("role", "listbox"); list.hidden = true;
   shell.append(button, list);
+  const positionFilterList = () => {
+    if (!shell.closest(".filter-grid")) return;
+    const rect = button.getBoundingClientRect();
+    const width = Math.min(rect.width, window.innerWidth - 16);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const height = Math.min(list.scrollHeight, 260);
+    const below = window.innerHeight - rect.bottom;
+    const top = below < height + 12 && rect.top > below
+      ? Math.max(8, rect.top - height - 5)
+      : rect.bottom + 5;
+    list.style.left = `${left}px`;
+    list.style.top = `${top}px`;
+    list.style.width = `${width}px`;
+  };
   const sync = () => {
     button.querySelector(".select-value").textContent = select.selectedOptions[0]?.textContent || "Выбрать";
     list.replaceChildren();
@@ -422,10 +535,11 @@ function enhanceSelect(select) {
   button.addEventListener("click", () => {
     document.querySelectorAll(".custom-select.is-open").forEach((other) => { if (other !== shell) { other.querySelector(".select-options").hidden = true; other.querySelector(".select-button").setAttribute("aria-expanded", "false"); other.classList.remove("is-open"); } });
     list.hidden = !list.hidden; button.setAttribute("aria-expanded", String(!list.hidden)); shell.classList.toggle("is-open", !list.hidden);
+    if (!list.hidden) positionFilterList();
   });
   shell.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { close(); button.focus(); }
-    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && document.activeElement === button) { event.preventDefault(); list.hidden = false; shell.classList.add("is-open"); button.setAttribute("aria-expanded", "true"); (event.key === "ArrowDown" ? list.firstElementChild : list.lastElementChild)?.focus(); }
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && document.activeElement === button) { event.preventDefault(); list.hidden = false; shell.classList.add("is-open"); button.setAttribute("aria-expanded", "true"); positionFilterList(); (event.key === "ArrowDown" ? list.firstElementChild : list.lastElementChild)?.focus(); }
     else if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); const options = [...list.children]; const index = options.indexOf(document.activeElement); options[Math.max(0, Math.min(options.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))]?.focus(); }
   });
   select.addEventListener("change", sync);

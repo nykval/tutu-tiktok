@@ -51,6 +51,38 @@ function posterFor(item) {
   return item.posterUrl || (item.source === "upload" ? LOCAL_POSTER : posterUrl(item.id));
 }
 
+function hotelStay(offer) {
+  try {
+    const url = new URL(offer.href);
+    const checkIn = url.searchParams.get("check_in");
+    const checkOut = url.searchParams.get("check_out");
+    const guests = Number(url.searchParams.get("room[0]"));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(checkIn || "") || !/^\d{4}-\d{2}-\d{2}$/.test(checkOut || "")) return "";
+    const format = (value) => {
+      const date = new Date(`${value}T12:00:00Z`);
+      if (Number.isNaN(date.getTime())) return "";
+      const parts = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", timeZone: "UTC" }).formatToParts(date);
+      const day = parts.find((part) => part.type === "day")?.value;
+      const month = parts.find((part) => part.type === "month")?.value;
+      return day && month ? `${day} ${month.slice(0, 3)}` : "";
+    };
+    const dates = `${format(checkIn)} — ${format(checkOut)}`;
+    if (dates.startsWith(" — ") || dates.endsWith(" — ")) return "";
+    if (!Number.isInteger(guests) || guests < 1) return dates;
+    const form = guests % 10 === 1 && guests % 100 !== 11 ? "гость"
+      : guests % 10 >= 2 && guests % 10 <= 4 && (guests % 100 < 12 || guests % 100 > 14) ? "гостя" : "гостей";
+    return `${dates}, ${guests} ${form}`;
+  } catch (error) {
+    return "";
+  }
+}
+
+function isHotelOffer(offer) {
+  if (offer.type === "hotel") return true;
+  try { return new URL(offer.href).hostname === "hotel.tutu.ru"; }
+  catch (error) { return false; }
+}
+
 function iconButton(action, label, svg) {
   const button = document.createElement("button");
   button.type = "button";
@@ -110,16 +142,18 @@ function render() {
     authorLine.className = "author-line";
     const avatar = document.createElement("span");
     avatar.className = "avatar";
-    avatar.textContent = (item.streamerName || "Б").slice(0, 1).toUpperCase();
-    if (item.streamerAvatar) {
+    const authorName = item.streamerId ? item.streamerName : "";
+    const authorAvatar = item.streamerId ? item.streamerAvatar : "";
+    avatar.textContent = (authorName || "Б").slice(0, 1).toUpperCase();
+    if (authorAvatar) {
       const picture = document.createElement("img");
-      picture.src = item.streamerAvatar; picture.alt = "";
+      picture.src = authorAvatar; picture.alt = "";
       picture.loading = "lazy";
       avatar.replaceChildren(picture);
     }
     const name = document.createElement("p");
     name.className = "name";
-    name.textContent = item.streamerName || "Блогеры рекомендуют";
+    name.textContent = authorName || "Блогеры рекомендуют";
     const caption = document.createElement("p");
     caption.className = "caption";
     caption.textContent = item.text;
@@ -138,11 +172,12 @@ function render() {
 
     (item.offers || []).forEach((offer) => {
       const card = document.createElement("a");
-      card.className = "offer";
+      const hotelOffer = isHotelOffer(offer);
+      card.className = hotelOffer ? "offer offer--hotel" : "offer";
       card.href = offer.href;
       card.target = "_blank";
       card.rel = "noopener noreferrer";
-      card.setAttribute("aria-label", offer.label);
+      card.setAttribute("aria-label", offer.label || offer.title);
 
       const thumb = document.createElement("img");
       thumb.className = "thumb";
@@ -157,10 +192,10 @@ function render() {
       const offerTitle = document.createElement("span");
       offerTitle.className = "offer-title";
       offerTitle.textContent = offer.title;
-      const offerPrice = document.createElement("span");
-      offerPrice.className = "offer-price";
-      offerPrice.textContent = offer.price;
-      text.append(offerTitle, offerPrice);
+      const offerDetail = document.createElement("span");
+      offerDetail.className = hotelOffer ? "offer-stay" : "offer-price";
+      offerDetail.textContent = hotelOffer ? hotelStay(offer) || offer.price : offer.price;
+      text.append(offerTitle, offerDetail);
 
       const chevron = document.createElement("span");
       chevron.className = "chevron";
