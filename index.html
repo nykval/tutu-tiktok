@@ -12,18 +12,14 @@
   <link rel="preconnect" href="https://kinescope.io" crossorigin />
   <link rel="preconnect" href="https://player.kinescope.io" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="feed.css?v=22" />
+  <link rel="stylesheet" href="feed.css?v=24" />
 </head>
 <body>
   <main class="phone">
     <div class="frame">
       <div class="feed" id="feed" tabindex="0"></div>
       <header class="topbar">
-        <a class="icon" href="admin.html" target="_top" aria-label="Вернуться в админку">
-          <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </a>
         <p class="brand"><img src="assets/brand/tututiktok-logo.png" alt="ТУТУТИКТОК" /></p>
-        <span class="icon" aria-hidden="true"></span>
       </header>
       <div class="scrub">
         <div class="scrub-bar"><div class="scrub-buffered" id="buffered"></div><div class="scrub-fill" id="scrub"></div><input id="seek" class="seek" type="range" min="0" max="1000" value="0" aria-label="Перемотать видео" /></div>
@@ -39,8 +35,8 @@
       window.dispatchEvent(new Event("kinescope-ready"));
     };
   </script>
-  <script src="https://player.kinescope.io/latest/iframe.player.js"></script>
+  <script async src="https://player.kinescope.io/latest/iframe.player.js"></script>
   <script src="feed-data.js?v=1"></script>
-  <script src="feed.js?v=24"></script>
+  <script src="feed.js?v=26"></script>
 </body>
 </html>

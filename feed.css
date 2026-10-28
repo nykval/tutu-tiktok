@@ -105,16 +105,14 @@ button, a { font-family: inherit; }
   left: 8px;
   right: 8px;
   height: 44px;
-  display: grid;
-  grid-template-columns: 44px 1fr 44px;
+  display: flex;
+  justify-content: center;
   align-items: center;
   pointer-events: none;
 }
 
-.is-preview .topbar > .icon:first-child { visibility: hidden; }
-
-.topbar .icon,
 .rail-btn {
+  position: relative;
   pointer-events: auto;
   width: 44px;
   height: 44px;
@@ -158,6 +156,20 @@ button, a { font-family: inherit; }
 .slide:has(.offer + .offer) .rail { bottom: 294px; }
 
 .rail-btn.is-on { color: #ff4d67; }
+
+.rail-btn.needs-tap::after {
+  content: "Включить звук";
+  position: absolute;
+  right: 44px;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font: 500 12px Roboto, sans-serif;
+}
 
 .dock {
   position: absolute;

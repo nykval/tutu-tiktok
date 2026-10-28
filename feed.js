@@ -1,6 +1,5 @@
 let FEED = DEFAULT_FEED.slice();
 let feedEnabled = true;
-if (new URLSearchParams(location.search).get("preview") === "1") document.documentElement.classList.add("is-preview");
 
 const feed = document.getElementById("feed");
 const status = document.getElementById("status");
@@ -22,7 +21,8 @@ const ICONS = {
 
 let player = null;
 let active = 0;
-let muted = true;
+let muted = false;
+let soundWanted = true;
 let generation = 0;
 let feedReady = false;
 let analyticsReady = false;
@@ -101,7 +101,7 @@ function render() {
     const rail = document.createElement("div");
     rail.className = "rail";
     rail.append(
-      iconButton("sound", "Звук", ICONS.soundOff),
+      iconButton("sound", "Звук", ICONS.soundOn),
       iconButton("like", "Нравится", ICONS.heart),
       iconButton("comment", "Комментарии", ICONS.comment),
       iconButton("share", "Поделиться", ICONS.share)
@@ -202,6 +202,7 @@ function paintSound() {
     button.innerHTML = muted ? ICONS.soundOff : ICONS.soundOn;
     button.setAttribute("aria-pressed", String(!muted));
     button.setAttribute("aria-label", muted ? "Включить звук" : "Выключить звук");
+    button.classList.toggle("needs-tap", muted && soundWanted && button.closest(".slide")?.classList.contains("is-active"));
   });
 }
 
@@ -209,10 +210,11 @@ async function applyMute() {
   const current = player;
   if (!current) { paintSound(); return; }
   try {
-    if (muted) await current.mute();
-    else await current.unmute();
+    if (soundWanted) await current.unmute();
+    else await current.mute();
+    if (current === player) muted = await current.isMuted();
   } catch (error) {
-    if (current === player && !muted) muted = true;
+    if (current === player && soundWanted) muted = true;
   }
   paintSound();
 }
@@ -222,13 +224,13 @@ let cachedPrevious = null;
 let playerIndex = -1;
 let hostSerial = 0;
 
-function playerOptions(id) {
+function playerOptions(id, autoPlay = false) {
   return {
     url: "https://kinescope.io/" + id,
     size: { width: "100%", height: "100%" },
     behavior: {
-      autoPlay: false,
-      muted: true,
+      autoPlay,
+      muted: !soundWanted,
       loop: true,
       playsInline: true,
       preload: "auto",
@@ -244,21 +246,22 @@ function playerOptions(id) {
   };
 }
 
-function createLocalPlayer(host, item, autoPlay = true) {
+function createLocalPlayer(host, item, autoPlay = false) {
   const video = document.createElement("video");
   video.src = item.mediaUrl;
-  video.muted = true;
+  video.muted = !soundWanted;
   video.autoplay = autoPlay;
   video.loop = true;
   video.playsInline = true;
   video.preload = "auto";
   host.appendChild(video);
   return {
-    Events: { Playing: "playing", Pause: "pause", Error: "error", Loaded: "loadeddata", Waiting: "waiting", Progress: "progress", TimeUpdate: "timeupdate", DurationChange: "durationchange" },
+    Events: { Playing: "playing", Pause: "pause", Error: "error", Loaded: "loadeddata", Waiting: "waiting", Progress: "progress", TimeUpdate: "timeupdate", DurationChange: "durationchange", VolumeChange: "volumechange" },
     on: (event, callback) => video.addEventListener(event, callback),
     once: (event, callback) => video.addEventListener(event, callback, { once: true }),
     mute: async () => { video.muted = true; },
     unmute: async () => { video.muted = false; },
+    isMuted: async () => video.muted,
     play: () => video.play(),
     pause: async () => { video.pause(); },
     isPaused: async () => video.paused,
@@ -270,6 +273,13 @@ function createLocalPlayer(host, item, autoPlay = true) {
 }
 
 function bindPlayer(instance, token) {
+  if (instance.Events.VolumeChange) instance.on(instance.Events.VolumeChange, (event) => {
+    if (token !== generation || instance !== player) return;
+    if (typeof event.data?.muted === "boolean") {
+      muted = event.data.muted;
+      paintSound();
+    }
+  });
   if (instance.Events.Loaded) instance.on(instance.Events.Loaded, () => {
     if (token === generation && instance === player && !hasFrame && !userPaused) startPlayback(instance);
   });
@@ -329,7 +339,12 @@ function markPlaying(instance, token) {
   retry.hidden = true;
   revealActive();
   if (userPaused || document.hidden) instance.pause().catch(() => {});
-  else applyMute();
+  else instance.isMuted().then((value) => {
+    if (token === generation && instance === player) {
+      muted = value;
+      paintSound();
+    }
+  }).catch(() => {});
 }
 
 function schedulePlaybackCheck(instance, token, delay = 1200) {
@@ -392,6 +407,8 @@ function show(index) {
   timeLabel.textContent = "00:00";
   recordEvent("view");
   slides().forEach((slide, i) => slide.classList.toggle("is-active", i === active));
+  muted = !soundWanted;
+  paintSound();
   revealActive();
   playbackState("buffering");
   status.hidden = true;
@@ -427,9 +444,24 @@ async function startPlayback(instance) {
     try { await instance.play(); }
     catch (error) {
       if (token === generation && instance === player && error?.name === "NotAllowedError") {
-        userPaused = true;
-        clearTimeout(playbackTimeout);
-        playbackState("paused");
+        if (soundWanted) {
+          try {
+            await instance.mute();
+            muted = true;
+            paintSound();
+            await instance.play();
+          } catch (fallbackError) {
+            if (fallbackError?.name === "NotAllowedError") {
+              userPaused = true;
+              clearTimeout(playbackTimeout);
+              playbackState("paused");
+            }
+          }
+        } else {
+          userPaused = true;
+          clearTimeout(playbackTimeout);
+          playbackState("paused");
+        }
       }
     }
     if (token !== generation) {
@@ -439,6 +471,11 @@ async function startPlayback(instance) {
     if (instance !== player || userPaused || document.hidden) {
       try { await instance.pause(); } catch (error) { /* ролик уже закрыт */ }
       return;
+    }
+    if (!playbackConfirmed) {
+      try {
+        if (!(await instance.isPaused())) markPlaying(instance, token);
+      } catch (error) { /* событие Playing подтвердит запуск */ }
     }
   })();
   startRequest = { instance, token, promise };
@@ -477,8 +514,8 @@ async function openVideo(index, token) {
     let instance;
     try {
       instance = FEED[index].source === "upload"
-        ? createLocalPlayer(host, FEED[index], false)
-        : await factory.create(hostId, playerOptions(FEED[index].id));
+        ? createLocalPlayer(host, FEED[index], token === 1)
+        : await factory.create(hostId, playerOptions(FEED[index].id, token === 1));
     } catch (error) {
       host.remove();
       throw error;
@@ -527,8 +564,9 @@ function fitCaptions() {
 
 async function loadFeed() {
   try {
-    const response = await fetch("/api/state", { cache: "no-store" });
-    if (response.ok) {
+    const response = location.hostname.endsWith("github.io")
+      ? null : await fetch("/api/state", { cache: "no-store" });
+    if (response?.ok) {
       const state = await response.json();
       const params = new URLSearchParams(location.search);
       const preview = params.get("preview") === "1";
@@ -579,6 +617,14 @@ async function togglePlayback() {
   const currentPlayer = player;
   if (!currentPlayer) return;
   try {
+    if (userPaused) {
+      userPaused = false;
+      playbackConfirmed = false;
+      playbackState("buffering");
+      watchForStall(generation);
+      await startPlayback(currentPlayer);
+      return;
+    }
     if (await currentPlayer.isPaused()) {
       userPaused = false;
       playbackConfirmed = false;
@@ -611,7 +657,7 @@ document.addEventListener("click", async (event) => {
   if (action) {
     const kind = action.dataset.action;
     if (kind === "sound") {
-      muted = !muted;
+      soundWanted = muted;
       await applyMute();
     } else if (kind === "like") {
       const on = action.classList.toggle("is-on");
