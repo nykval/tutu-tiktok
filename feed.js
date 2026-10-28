@@ -53,6 +53,7 @@ let lastTimeUpdateAt = 0;
 const pendingProgressReads = new WeakSet();
 let playbackTimeout = 0;
 let playbackRetryTimer = 0;
+let playbackTapTimer = 0;
 let playbackAttempts = 0;
 let playbackConfirmed = false;
 let mutedAutoplayFallbackTried = false;
@@ -1079,6 +1080,19 @@ async function togglePlayback() {
   } catch (error) { showPlaybackError("Не удалось продолжить воспроизведение."); }
 }
 
+function queuePlaybackTap(handler) {
+  clearTimeout(playbackTapTimer);
+  playbackTapTimer = window.setTimeout(() => {
+    playbackTapTimer = 0;
+    void handler();
+  }, 320);
+}
+
+function cancelPlaybackTap() {
+  clearTimeout(playbackTapTimer);
+  playbackTapTimer = 0;
+}
+
 retry.addEventListener("click", () => {
   if (!factory && FEED[active]?.source !== "upload") { location.reload(); return; }
   status.hidden = true;
@@ -1095,6 +1109,9 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest(".offer")) recordEvent("offer_click");
   const action = event.target.closest("[data-action]");
   if (action) {
+    // Action buttons must never bubble into the feed playback handler.
+    event.preventDefault();
+    event.stopPropagation();
     const kind = action.dataset.action;
     if (kind === "like") {
       const on = action.classList.toggle("is-on");
@@ -1109,25 +1126,27 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (!event.target.closest("#feed") || event.target.closest("a") || !player) return;
-  if (muted && soundWanted) {
-    const currentPlayer = player;
-    const shouldResume = userPaused || await currentPlayer.isPaused().catch(() => false);
-    if (currentPlayer !== player) return;
-    try {
-      await currentPlayer.unmute();
-      if (currentPlayer === player) muted = await currentPlayer.isMuted();
-    } catch (error) { /* браузер может запретить звук до следующего действия */ }
-    if (shouldResume && currentPlayer === player) {
-      userPaused = false;
-      playbackConfirmed = false;
-      playbackAttempts = 0;
-      playbackState("buffering");
-      watchForStall(generation);
-      await startPlayback(currentPlayer);
+  queuePlaybackTap(async () => {
+    if (muted && soundWanted) {
+      const currentPlayer = player;
+      const shouldResume = userPaused || await currentPlayer.isPaused().catch(() => false);
+      if (currentPlayer !== player) return;
+      try {
+        await currentPlayer.unmute();
+        if (currentPlayer === player) muted = await currentPlayer.isMuted();
+      } catch (error) { /* браузер может запретить звук до следующего действия */ }
+      if (shouldResume && currentPlayer === player) {
+        userPaused = false;
+        playbackConfirmed = false;
+        playbackAttempts = 0;
+        playbackState("buffering");
+        watchForStall(generation);
+        await startPlayback(currentPlayer);
+      }
+      return;
     }
-    return;
-  }
-  await togglePlayback();
+    await togglePlayback();
+  });
 });
 
 feed.addEventListener("dblclick", (event) => {
@@ -1136,6 +1155,7 @@ feed.addEventListener("dblclick", (event) => {
   const action = slide?.querySelector('[data-action="like"]');
   if (!slide || !action) return;
   event.preventDefault();
+  cancelPlaybackTap();
   if (!action.classList.contains("is-on")) setLikeState(action, true);
   showDoubleTapLike(slide, event);
 });

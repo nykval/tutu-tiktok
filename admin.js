@@ -265,21 +265,18 @@ function renderCard(item) {
     const fact = el("div", `video-fact video-fact-${key}`);
     const detail = el("dd", name === "Автор" && !author ? "is-empty" : "", value);
     detail.title = value;
-    const factIcon = key === "source" ? "video-camera" : key === "id" ? "copy" : "user";
-    const label = el("dt", "");
-    label.append(icon(factIcon), document.createTextNode(name));
-    fact.append(label, detail);
+    fact.append(el("dt", "", name), detail);
     facts.append(fact);
   }
   card.append(facts);
 
   const metrics = el("div", "video-metrics");
   const likeMetric = el("span", "video-metric");
-  likeMetric.append(el("i", "like-metric-icon"), el("strong", "", String(likeCountFor(item.id))));
+  likeMetric.append(el("span", "video-metric-label", "Лайки"), el("strong", "", String(likeCountFor(item.id))));
   likeMetric.setAttribute("aria-label", `Лайки: ${likeCountFor(item.id)}`);
   const viewCount = reportStats.byVideo?.[item.id]?.view || 0;
   const viewMetric = el("span", "video-metric");
-  viewMetric.append(icon("eye"), el("strong", "", String(viewCount)));
+  viewMetric.append(el("span", "video-metric-label", "Просмотры"), el("strong", "", String(viewCount)));
   viewMetric.setAttribute("aria-label", `Просмотры: ${viewCount}`);
   metrics.append(likeMetric, viewMetric);
   card.append(metrics);
