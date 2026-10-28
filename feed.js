@@ -32,6 +32,7 @@ let playbackTimeout = 0;
 let playbackRetryTimer = 0;
 let playbackAttempts = 0;
 let playbackConfirmed = false;
+let mutedAutoplayFallbackTried = false;
 
 function recordEvent(type, item = FEED[active]) {
   if (!analyticsReady || !item) return;
@@ -247,7 +248,7 @@ function playerOptions(id, autoPlay = false) {
       playsInline: true,
       preload: "auto",
       keyboard: false,
-      autoPause: true,
+      autoPause: false,
       localStorage: { time: false, quality: false },
     },
     ui: {
@@ -331,7 +332,12 @@ function prewarmNeighbor(offset) {
 
 function prewarmNeighbors() {
   const offsets = scrollDirection < 0 ? [-1, 1, 2] : [1, 2, -1];
-  offsets.forEach(prewarmNeighbor);
+  const next = offsets.find((offset) => !hasPreparedNeighbor(active + offset));
+  if (next === undefined) return;
+  prewarmNeighbor(next);
+  if (offsets.some((offset) => !hasPreparedNeighbor(active + offset))) {
+    schedulePreload(generation, 750);
+  }
 }
 
 function prunePreloads(index) {
@@ -343,10 +349,11 @@ function prunePreloads(index) {
   }
 }
 
-function schedulePreload(token, delay = 180) {
+function schedulePreload(token, delay = 500) {
   clearTimeout(preloadTimer);
   preloadTimer = setTimeout(() => {
-    if (token === generation && player && !userPaused && !document.hidden) prewarmNeighbors();
+    preloadTimer = 0;
+    if (token === generation && player && playbackConfirmed && !userPaused && !document.hidden) prewarmNeighbors();
   }, delay);
 }
 
@@ -423,7 +430,9 @@ function bindPlayer(instance, token) {
 
 function markPlaying(instance, token) {
   if (token !== generation || instance !== player) return;
+  const firstConfirmation = !playbackConfirmed;
   clearTimeout(playbackTimeout);
+  playbackTimeout = 0;
   clearTimeout(playbackRetryTimer);
   playbackAttempts = 0;
   playbackConfirmed = true;
@@ -432,8 +441,8 @@ function markPlaying(instance, token) {
   status.hidden = true;
   retry.hidden = true;
   revealActive();
-  if (!hasPreparedNeighbor(active + 1) || !hasPreparedNeighbor(active + 2) ||
-      !hasPreparedNeighbor(active - 1)) schedulePreload(token, 0);
+  if (firstConfirmation && (!hasPreparedNeighbor(active + 1) || !hasPreparedNeighbor(active + 2) ||
+      !hasPreparedNeighbor(active - 1))) schedulePreload(token);
   refreshProgress(instance, token);
   if (userPaused || document.hidden) instance.pause().catch(() => {});
   else instance.isMuted().then((value) => {
@@ -462,8 +471,18 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
       }
     } catch (error) { /* плеер может ещё загружаться */ }
     if (token !== generation || instance !== player || userPaused || document.hidden) return;
-    if (++playbackAttempts >= 3) {
-      showPlaybackError("Не удалось запустить видео. Попробуйте ещё раз.");
+    playbackAttempts += 1;
+    if (playbackAttempts === 2 && soundWanted && !mutedAutoplayFallbackTried) {
+      mutedAutoplayFallbackTried = true;
+      try {
+        await instance.mute();
+        if (token !== generation || instance !== player || userPaused || document.hidden) return;
+        muted = true;
+      } catch (error) { /* плеер может ещё загружаться */ }
+    }
+    if (playbackAttempts >= 3) {
+      // A paused iframe may still be fetching its first segment. Wait for Playing or the stall deadline.
+      schedulePlaybackCheck(instance, token, 2000);
       return;
     }
     startPlayback(instance);
@@ -472,6 +491,7 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
 
 function showPlaybackError(message) {
   clearTimeout(playbackTimeout);
+  playbackTimeout = 0;
   clearTimeout(playbackRetryTimer);
   playbackState("error");
   status.textContent = message;
@@ -480,10 +500,11 @@ function showPlaybackError(message) {
 }
 
 function watchForStall(token) {
-  clearTimeout(playbackTimeout);
+  if (playbackTimeout) return;
   playbackTimeout = setTimeout(() => {
+    playbackTimeout = 0;
     if (token === generation && !userPaused && !document.hidden) showPlaybackError("Видео загружается слишком долго.");
-  }, 15000);
+  }, 20000);
 }
 
 let mountingIndex = -1;
@@ -524,7 +545,10 @@ function mount(index) {
   mountingIndex = index;
   playbackAttempts = 0;
   playbackConfirmed = false;
+  mutedAutoplayFallbackTried = false;
   clearTimeout(playbackRetryTimer);
+  clearTimeout(playbackTimeout);
+  playbackTimeout = 0;
   watchForStall(token);
   openVideo(index, token)
     .catch((error) => {
@@ -556,12 +580,14 @@ async function startPlayback(instance) {
             if (fallbackError?.name === "NotAllowedError") {
               userPaused = true;
               clearTimeout(playbackTimeout);
+              playbackTimeout = 0;
               playbackState("paused");
             }
           }
         } else {
           userPaused = true;
           clearTimeout(playbackTimeout);
+          playbackTimeout = 0;
           playbackState("paused");
         }
       }
@@ -642,7 +668,6 @@ async function openVideo(index, token) {
   playerIndex = index;
   bindPlayer(instance, token);
   refreshProgress(instance, token, true);
-  schedulePreload(token);
   document.documentElement.dataset.player = "ready";
   status.hidden = true;
   await startPlayback(instance);
@@ -746,6 +771,7 @@ async function togglePlayback() {
     } else {
       userPaused = true;
       clearTimeout(playbackTimeout);
+      playbackTimeout = 0;
       await currentPlayer.pause();
       playbackState("paused");
     }
