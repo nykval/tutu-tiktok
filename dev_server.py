@@ -137,6 +137,14 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_error(404)
         return super().do_GET()
 
+    def do_HEAD(self):
+        path = urlsplit(self.path).path
+        if path.startswith("/media/"):
+            return self.serve_media(path.removeprefix("/media/"), head_only=True)
+        if path.startswith("/api/") or any(part.startswith(".") for part in Path(unquote(path)).parts):
+            return self.send_error(404)
+        return super().do_HEAD()
+
     def do_POST(self):
         path = urlsplit(self.path).path
         if path == "/api/upload":
@@ -403,7 +411,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.error_response(400, str(error))
         return self.json_response(201, {"saved": True})
 
-    def serve_media(self, filename):
+    def serve_media(self, filename, head_only=False):
         if not re.fullmatch(r"[a-f0-9]{32}\.(mp4|webm|png|jpe?g|webp)", filename):
             return self.send_error(404)
         target = UPLOADS / filename
@@ -414,11 +422,18 @@ class Handler(SimpleHTTPRequestHandler):
         partial = False
         range_header = self.headers.get("Range", "")
         if range_header:
-            match = re.fullmatch(r"bytes=(\d+)-(\d*)", range_header)
-            if not match:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+            if not match or not any(match.groups()):
                 return self.send_error(416)
-            start = int(match.group(1))
-            end = min(int(match.group(2)), size - 1) if match.group(2) else size - 1
+            if match.group(1):
+                start = int(match.group(1))
+                end = min(int(match.group(2)), size - 1) if match.group(2) else size - 1
+            else:
+                suffix = int(match.group(2))
+                if suffix == 0:
+                    return self.send_error(416)
+                start = max(0, size - suffix)
+                end = size - 1
             if start > end or start >= size:
                 return self.send_error(416)
             partial = True
@@ -426,18 +441,24 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", MEDIA_TYPES[target.suffix])
         self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()
+        if head_only:
+            return
         with target.open("rb") as handle:
             handle.seek(start)
             remaining = end - start + 1
-            while remaining:
-                chunk = handle.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                remaining -= len(chunk)
+            try:
+                while remaining:
+                    chunk = handle.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
 
 if __name__ == "__main__":

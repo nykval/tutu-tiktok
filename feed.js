@@ -6,6 +6,29 @@ const status = document.getElementById("status");
 const scrub = document.getElementById("scrub");
 const seek = document.getElementById("seek");
 const retry = document.getElementById("retry");
+const LIKE_COUNTS_KEY = "tututiktok-like-counts-v1";
+
+function loadLikeCounts() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LIKE_COUNTS_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch (error) { return {}; }
+}
+
+const likeCounts = loadLikeCounts();
+
+function likeCountFor(videoId) {
+  const stored = Number(likeCounts[videoId]);
+  if (Number.isInteger(stored) && stored >= 11) return stored;
+  const initial = 11 + Math.floor(Math.random() * 40);
+  likeCounts[videoId] = initial;
+  try { localStorage.setItem(LIKE_COUNTS_KEY, JSON.stringify(likeCounts)); } catch (error) { /* storage may be unavailable */ }
+  return initial;
+}
+
+function saveLikeCounts() {
+  try { localStorage.setItem(LIKE_COUNTS_KEY, JSON.stringify(likeCounts)); } catch (error) { /* storage may be unavailable */ }
+}
 
 const ICONS = {
   heart: '<span class="heart-icon" aria-hidden="true"></span>',
@@ -35,6 +58,11 @@ let playbackConfirmed = false;
 let mutedAutoplayFallbackTried = false;
 let recoveryCount = 0;
 let bandwidthTimer = 0;
+let bufferedUntil = 0;
+let lastBufferReportAt = 0;
+let playingSince = 0;
+let everPlayedCurrent = false;
+let constrainedUntil = 0;
 
 function recordEvent(type, item = FEED[active]) {
   if (!analyticsReady || !item) return;
@@ -86,14 +114,20 @@ function isHotelOffer(offer) {
   catch (error) { return false; }
 }
 
-function iconButton(action, label, svg) {
+function iconButton(action, label, svg, count) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "rail-btn";
   button.dataset.action = action;
-  button.setAttribute("aria-label", label);
+  button.setAttribute("aria-label", count === undefined ? label : `${label}: ${count}`);
   if (action === "like") button.setAttribute("aria-pressed", "false");
   button.innerHTML = svg;
+  if (count !== undefined) {
+    const countNode = document.createElement("span");
+    countNode.className = "rail-count";
+    countNode.textContent = String(count);
+    button.append(countNode);
+  }
   return button;
 }
 
@@ -131,7 +165,7 @@ function render() {
     const rail = document.createElement("div");
     rail.className = "rail";
     rail.append(
-      iconButton("like", "Нравится", ICONS.heart),
+      iconButton("like", "Нравится", ICONS.heart, likeCountFor(item.id)),
       iconButton("share", "Поделиться", ICONS.share)
     );
     slide.appendChild(rail);
@@ -185,8 +219,10 @@ function render() {
       const thumb = document.createElement("img");
       thumb.className = "thumb";
       thumb.alt = "";
-      thumb.src = offer.image || posterFor(item);
-      thumb.loading = "lazy";
+      const thumbUrl = offer.image || posterFor(item);
+      if (index === active) thumb.src = thumbUrl;
+      else thumb.dataset.src = thumbUrl;
+      thumb.loading = index === active ? "eager" : "lazy";
       thumb.decoding = "async";
       thumb.fetchPriority = "low";
 
@@ -217,6 +253,15 @@ function slides() {
   return [...feed.querySelectorAll(".slide")];
 }
 
+function loadOfferImages(index) {
+  const slide = slides()[index];
+  if (!slide) return;
+  slide.querySelectorAll(".thumb[data-src]").forEach((image) => {
+    image.src = image.dataset.src;
+    delete image.dataset.src;
+  });
+}
+
 function revealActive() {
   slides().forEach((slide, index) => {
     slide.classList.toggle("is-revealed", index === active && hasFrame);
@@ -242,7 +287,7 @@ let scrollDirection = 1;
 function qualityCap() {
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   if (connection?.saveData || /2g/.test(connection?.effectiveType || "")) return 360;
-  if (recoveryCount || connection?.effectiveType === "3g") return 480;
+  if (recoveryCount || Date.now() < constrainedUntil || connection?.effectiveType === "3g") return 480;
   return 720;
 }
 
@@ -323,11 +368,16 @@ async function createKinescopePlayer(hostId, options, timeoutMs) {
 
 async function takePreparedPlayer(entry) {
   let timer = 0;
-  const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(null), 2200); });
-  const instance = await Promise.race([entry.promise, deadline]);
-  clearTimeout(timer);
-  if (!instance) discardPreload(entry);
-  return instance;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), 2400);
+  });
+  try {
+    const instance = await Promise.race([entry.promise, deadline]);
+    if (!instance) discardPreload(entry);
+    return instance;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function prewarmNeighbor(offset) {
@@ -364,19 +414,35 @@ function prewarmNeighbor(offset) {
     } catch (error) {
       host.remove();
       if (preloadedNeighbors.get(index) === entry) preloadedNeighbors.delete(index);
+      if (!entry.cancelled) failedPreloads.add(index);
       return null;
     }
   })();
+  return entry;
+}
+
+const failedPreloads = new Set();
+
+function continuePreloading(entry, token) {
+  if (entry.nextToken === token) return;
+  entry.nextToken = token;
+  entry.promise.then(() => {
+    if (!entry.cancelled && token === generation && playbackConfirmed && !document.hidden) schedulePreload(token, 600);
+  });
 }
 
 function prewarmNeighbors() {
-  const offsets = scrollDirection < 0 ? [-1, 1, 2] : [1, 2, -1];
-  const next = offsets.find((offset) => !hasPreparedNeighbor(active + offset));
-  if (next === undefined) return;
-  prewarmNeighbor(next);
-  if (offsets.some((offset) => !hasPreparedNeighbor(active + offset))) {
-    schedulePreload(generation, 750);
+  const token = generation;
+  const pending = [...preloadedNeighbors.values()].find((entry) => !entry.player && !entry.cancelled);
+  if (pending) {
+    continuePreloading(pending, token);
+    return;
   }
+  const offsets = scrollDirection < 0 ? [-1, 1, 2] : [1, 2, -1];
+  const next = offsets.find((offset) => !hasPreparedNeighbor(active + offset) && !failedPreloads.has(active + offset));
+  if (next === undefined) return;
+  const entry = prewarmNeighbor(next);
+  if (entry) continuePreloading(entry, token);
 }
 
 function releasePreloads() {
@@ -399,7 +465,14 @@ function schedulePreload(token, delay = 500) {
   clearTimeout(preloadTimer);
   preloadTimer = setTimeout(() => {
     preloadTimer = 0;
-    if (token === generation && player && playbackConfirmed && !userPaused && !document.hidden) prewarmNeighbors();
+    if (token !== generation || !player || !playbackConfirmed || userPaused || document.hidden) return;
+    const recentBufferReport = Date.now() - lastBufferReportAt < 5000;
+    const bufferAhead = bufferedUntil - currentTime;
+    if (recentBufferReport && bufferAhead < 3 && Date.now() - playingSince < 5000) {
+      schedulePreload(token, 500);
+      return;
+    }
+    prewarmNeighbors();
   }, delay);
 }
 
@@ -415,11 +488,15 @@ function beginBuffering(token) {
   clearTimeout(preloadTimer);
   preloadTimer = 0;
   watchForStall(token);
-  clearTimeout(bandwidthTimer);
-  bandwidthTimer = setTimeout(() => {
-    bandwidthTimer = 0;
-    if (token === generation && !playbackConfirmed && !document.hidden) releasePreloads();
-  }, 1200);
+  if (!bandwidthTimer) {
+    bandwidthTimer = setTimeout(() => {
+      bandwidthTimer = 0;
+      if (token === generation && !playbackConfirmed && !document.hidden) {
+        if (everPlayedCurrent) constrainedUntil = Date.now() + 30000;
+        releasePreloads();
+      }
+    }, 1200);
+  }
 }
 
 const boundPlayerTokens = new WeakMap();
@@ -474,6 +551,21 @@ function bindPlayer(instance, token) {
       if (!playbackConfirmed && time > 0 && !userPaused && instance === player) markPlaying(instance, currentToken());
     }
   });
+  if (instance.Events.Progress) instance.on(instance.Events.Progress, (event) => {
+    if (currentToken() !== generation || instance !== player) return;
+    let buffered = event.data?.bufferedTime;
+    const ranges = event.target?.buffered;
+    if (!Number.isFinite(buffered) && ranges?.length) buffered = ranges.end(ranges.length - 1);
+    if (Number.isFinite(buffered) && buffered > bufferedUntil) {
+      bufferedUntil = buffered;
+      lastBufferReportAt = Date.now();
+      if (!playbackConfirmed && !userPaused && !document.hidden) {
+        clearTimeout(playbackTimeout);
+        playbackTimeout = 0;
+        watchForStall(currentToken());
+      }
+    }
+  });
   if (instance.Events.DurationChange) instance.on(instance.Events.DurationChange, (event) => {
     if (currentToken() !== generation) return;
     const duration = event.data?.duration ?? event.target?.duration;
@@ -490,6 +582,7 @@ function bindPlayer(instance, token) {
 function markPlaying(instance, token) {
   if (token !== generation || instance !== player) return;
   const firstConfirmation = !playbackConfirmed;
+  if (firstConfirmation) playingSince = Date.now();
   clearTimeout(playbackTimeout);
   playbackTimeout = 0;
   clearTimeout(playbackRetryTimer);
@@ -497,13 +590,14 @@ function markPlaying(instance, token) {
   bandwidthTimer = 0;
   playbackAttempts = 0;
   playbackConfirmed = true;
+  everPlayedCurrent = true;
   hasFrame = true;
   playbackState(userPaused || document.hidden ? "paused" : "playing");
   status.hidden = true;
   retry.hidden = true;
   revealActive();
   if (firstConfirmation && (!hasPreparedNeighbor(active + 1) || !hasPreparedNeighbor(active + 2) ||
-      !hasPreparedNeighbor(active - 1))) schedulePreload(token, recoveryCount ? 4000 : 500);
+      !hasPreparedNeighbor(active - 1))) schedulePreload(token, recoveryCount ? 4000 : 1200);
   refreshProgress(instance, token);
   if (userPaused || document.hidden) instance.pause().catch(() => {});
   else instance.isMuted().then((value) => {
@@ -552,6 +646,10 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
 
 function showPlaybackError(message) {
   releasePreloads();
+  if (cachedPrevious) {
+    cachedPrevious.player.destroy().catch(() => {});
+    cachedPrevious = null;
+  }
   clearTimeout(playbackTimeout);
   playbackTimeout = 0;
   clearTimeout(playbackRetryTimer);
@@ -566,6 +664,7 @@ function showPlaybackError(message) {
 function failPlayback(message) {
   if (recoveryCount === 0 && !userPaused && !document.hidden) {
     recoveryCount = 1;
+    constrainedUntil = Date.now() + 60000;
     releasePreloads();
     if (cachedPrevious) cachedPrevious.player.destroy().catch(() => {});
     cachedPrevious = null;
@@ -594,7 +693,10 @@ function show(index) {
     return;
   }
   if (next !== active) scrollDirection = next > active ? 1 : -1;
-  if (next !== active) recoveryCount = 0;
+  if (next !== active) {
+    recoveryCount = 0;
+    failedPreloads.clear();
+  }
   const previous = player;
   if (previous) previous.pause().catch(() => {});
   clearTimeout(preloadTimer);
@@ -607,11 +709,16 @@ function show(index) {
   currentDuration = 0;
   currentTime = 0;
   lastTimeUpdateAt = 0;
+  bufferedUntil = 0;
+  lastBufferReportAt = 0;
+  playingSince = 0;
+  everPlayedCurrent = false;
   seek.value = "0";
   seek.setAttribute("aria-valuetext", "Видео загружается");
   scrub.style.width = "0%";
   recordEvent("view");
   slides().forEach((slide, i) => slide.classList.toggle("is-active", i === active));
+  loadOfferImages(active);
   muted = !soundWanted;
   revealActive();
   playbackState("buffering");
@@ -626,6 +733,9 @@ function mount(index) {
   playbackAttempts = 0;
   playbackConfirmed = false;
   mutedAutoplayFallbackTried = false;
+  bufferedUntil = 0;
+  lastBufferReportAt = 0;
+  playingSince = 0;
   clearTimeout(playbackRetryTimer);
   clearTimeout(playbackTimeout);
   playbackTimeout = 0;
@@ -822,12 +932,24 @@ loadFeed();
 window.addEventListener("resize", fitCaptions);
 
 let scrollFrame = 0;
+let scrollSettleTimer = 0;
 feed.addEventListener("scroll", () => {
+  clearTimeout(scrollSettleTimer);
+  scrollSettleTimer = setTimeout(() => {
+    scrollSettleTimer = 0;
+    const index = indexFromScroll();
+    if (index !== active) show(index);
+  }, 80);
   if (scrollFrame) return;
   scrollFrame = requestAnimationFrame(() => {
     scrollFrame = 0;
     const index = indexFromScroll();
-    if (index !== active) show(index);
+    const height = feed.clientHeight || 1;
+    if (index !== active && Math.abs(feed.scrollTop - index * height) < height * 0.08) {
+      clearTimeout(scrollSettleTimer);
+      scrollSettleTimer = 0;
+      show(index);
+    }
   });
 }, { passive: true });
 
@@ -881,6 +1003,14 @@ document.addEventListener("click", async (event) => {
     if (kind === "like") {
       const on = action.classList.toggle("is-on");
       action.setAttribute("aria-pressed", String(on));
+      const slide = action.closest(".slide");
+      const item = FEED[Number(slide?.dataset.index)];
+      if (item) {
+        likeCounts[item.id] = Math.max(0, likeCountFor(item.id) + (on ? 1 : -1));
+        action.querySelector(".rail-count").textContent = String(likeCounts[item.id]);
+        action.setAttribute("aria-label", `Нравится: ${likeCounts[item.id]}`);
+        saveLikeCounts();
+      }
       if (on) recordEvent("like");
     } else if (kind === "share" && navigator.share) {
       navigator.share({ title: "Тревел лента", url: location.href }).catch(() => {});
@@ -983,6 +1113,7 @@ document.addEventListener("visibilitychange", async () => {
   if (!currentPlayer) return;
   if (document.hidden) {
     visibilityPaused = !userPaused;
+    releasePreloads();
     clearTimeout(playbackTimeout);
     playbackTimeout = 0;
     clearTimeout(playbackRetryTimer);
@@ -997,6 +1128,22 @@ document.addEventListener("visibilitychange", async () => {
     watchForStall(generation);
     await startPlayback(currentPlayer);
   }
+});
+
+window.addEventListener("online", () => {
+  failedPreloads.clear();
+  constrainedUntil = 0;
+  if (player && playbackConfirmed && !document.hidden) schedulePreload(generation, 900);
+});
+
+window.addEventListener("offline", () => {
+  releasePreloads();
+});
+
+window.addEventListener("pagehide", () => {
+  releasePreloads();
+  if (player) player.destroy().catch(() => {});
+  if (cachedPrevious) cachedPrevious.player.destroy().catch(() => {});
 });
 
 setInterval(() => {
