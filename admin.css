@@ -181,7 +181,8 @@ h2 { margin: 6px 0 0; font-size: 23px; font-weight: 600; letter-spacing: -.025em
 .second-offer { margin: 1px 0 13px; padding-top: 9px; border-top: 1px solid #e9e5ef; }
 .second-offer summary { color: #6652b3; font-size: 12px; font-weight: 600; cursor: pointer; }
 .second-offer[open] summary { margin-bottom: 12px; }
-body.preview-open { position: fixed; top: var(--preview-scroll-offset); left: 0; width: 100%; overflow: hidden; }
+body.modal-open { position: fixed; left: 0; width: 100%; overflow: hidden; }
+.video-dialog form, .entity-dialog form { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .preview-dialog { position: fixed; inset: auto; top: 50%; left: 50%; width: min(400px,47.25vh,calc(100vw - 24px)); max-height: calc(100vh - 24px); margin: 0; padding: 0; overflow: hidden; border: 0; border-radius: 14px; box-shadow: 0 25px 70px #20173d45; background: #171321; transform: translate(-50%,-50%); }
 .preview-dialog::backdrop { background: #1b1732ae; }
 .preview-body { overflow: hidden; background: #171321; }

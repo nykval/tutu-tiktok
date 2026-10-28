@@ -17,7 +17,22 @@ let editing = null;
 let state = { enabled: true, hiddenIds: [], overrides: {}, videos: [] };
 let apiAvailable = false;
 let toastTimer;
-let previewScrollY = 0;
+let modalScrollY = null;
+
+function syncModalScroll() {
+  if (document.querySelector("dialog[open]")) {
+    if (modalScrollY !== null) return;
+    modalScrollY = window.scrollY;
+    document.body.style.top = `${-modalScrollY}px`;
+    document.body.classList.add("modal-open");
+  } else if (modalScrollY !== null) {
+    const restoreY = modalScrollY;
+    modalScrollY = null;
+    document.body.classList.remove("modal-open");
+    document.body.style.removeProperty("top");
+    window.scrollTo(0, restoreY);
+  }
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, { cache: "no-store", ...options });
@@ -62,10 +77,8 @@ function openPreview(item) {
   frame.title = `Предпросмотр: ${item.title}`;
   frame.allow = "autoplay; fullscreen; picture-in-picture";
   document.getElementById("preview-body").replaceChildren(frame);
-  previewScrollY = window.scrollY;
-  document.body.style.setProperty("--preview-scroll-offset", `${-previewScrollY}px`);
-  document.body.classList.add("preview-open");
   previewDialog.showModal();
+  syncModalScroll();
 }
 
 function menuAction(label, iconName, callback, danger = false) {
@@ -378,6 +391,7 @@ function openForm(item = null) {
   showSource();
   document.querySelectorAll("#video-dialog select").forEach((select) => select.updateCustomSelect?.());
   dialog.showModal();
+  syncModalScroll();
 }
 
 form.addEventListener("change", (event) => {
@@ -455,6 +469,7 @@ dialog.addEventListener("close", () => {
   form.reset();
   editing = null;
   document.getElementById("form-error").hidden = true;
+  syncModalScroll();
 });
 search.addEventListener("input", render);
 for (const control of [statusFilter, sourceFilter, collectionFilter, categoryFilter, streamerFilter, productFilter, sortBy]) control.addEventListener("change", render);
@@ -464,9 +479,7 @@ document.getElementById("empty-clear").addEventListener("click", clearFilters);
 document.getElementById("preview-close").addEventListener("click", () => previewDialog.close());
 previewDialog.addEventListener("close", () => {
   document.getElementById("preview-body").replaceChildren();
-  document.body.classList.remove("preview-open");
-  document.body.style.removeProperty("--preview-scroll-offset");
-  window.scrollTo(0, previewScrollY);
+  syncModalScroll();
 });
 document.addEventListener("click", (event) => { document.querySelectorAll(".card-menu[open]").forEach((menu) => { if (!menu.contains(event.target)) menu.open = false; }); });
 async function init() {

@@ -232,6 +232,7 @@ document.body.append(entityDialog);
 const entityForm = document.getElementById("entity-form");
 document.getElementById("entity-close").addEventListener("click", () => entityDialog.close());
 document.getElementById("entity-cancel").addEventListener("click", () => entityDialog.close());
+entityDialog.addEventListener("close", () => window.syncModalScroll());
 
 function openEntityForm(kind, item = null) {
   entityEditing = item;
@@ -268,6 +269,7 @@ function openEntityForm(kind, item = null) {
     if (control.tagName === "SELECT") enhanceSelect(control);
   }
   entityDialog.showModal();
+  window.syncModalScroll();
 }
 
 entityForm.addEventListener("submit", async (event) => {
