@@ -284,9 +284,16 @@ function clearFilters() {
 }
 
 function showSource() {
-  const isUpload = form.elements.source.value === "upload";
+  const isUpload = (editing?.source || form.elements.source.value) === "upload";
+  const isEditingKinescope = !!editing && !isUpload;
   document.getElementById("kinescope-field").hidden = isUpload;
-  document.getElementById("upload-field").hidden = !isUpload;
+  document.getElementById("upload-field").hidden = !!editing || !isUpload;
+  form.elements.kinescopeUrl.readOnly = isEditingKinescope;
+  document.getElementById("kinescope-required").hidden = isEditingKinescope;
+  document.getElementById("kinescope-help").textContent = isEditingKinescope
+    ? "Ссылка собрана из ID ролика. Чтобы заменить видео, добавьте новый ролик."
+    : "Подойдёт ссылка на ролик или его короткий ID.";
+  document.getElementById("kinescope-open").hidden = !isEditingKinescope;
 }
 
 function kinescopeId(value) {
@@ -345,8 +352,12 @@ function openForm(item = null) {
   document.getElementById("dialog-intro").textContent = item ? `ID: ${item.id} · Источник: ${item.source === "upload" ? "файл" : "Кинескоп"}` : "Добавьте ролик из Кинескопа или загрузите файл на локальный сервер.";
   document.getElementById("save-button").querySelector(".button-label").textContent = item ? "Сохранить изменения" : "Добавить в ленту";
   if (item) {
-    document.getElementById("kinescope-field").hidden = true;
-    document.getElementById("upload-field").hidden = true;
+    form.querySelector(`[name="source"][value="${item.source}"]`).checked = true;
+    if (item.source === "kinescope") {
+      const url = `https://kinescope.io/${item.id}`;
+      form.elements.kinescopeUrl.value = url;
+      document.getElementById("kinescope-open").href = url;
+    }
     form.elements.title.value = item.title;
     form.elements.text.value = item.text || "";
     form.elements.collection.value = item.collection || "";
@@ -363,8 +374,8 @@ function openForm(item = null) {
     document.getElementById("second-offer").open = (item.offers?.length || 0) > 1;
   } else {
     document.getElementById("second-offer").open = false;
-    showSource();
   }
+  showSource();
   document.querySelectorAll("#video-dialog select").forEach((select) => select.updateCustomSelect?.());
   dialog.showModal();
 }

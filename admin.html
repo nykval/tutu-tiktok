@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="admin.css?v=28">
+  <link rel="stylesheet" href="admin.css?v=29">
 </head>
 <body>
   <div class="app-shell">
@@ -69,7 +69,7 @@
       <div class="dialog-head"><div><span class="section-label" id="dialog-eyebrow">НОВЫЙ КОНТЕНТ</span><h2 id="dialog-title">Добавить видео</h2></div><button type="button" class="icon-close" id="dialog-close" aria-label="Закрыть"><span class="ui-icon icon-cross" aria-hidden="true"></span></button></div>
       <p class="dialog-intro" id="dialog-intro">Добавьте ролик из Кинескопа или загрузите файл на локальный сервер.</p>
       <fieldset class="source-tabs" id="source-tabs"><legend class="sr-only">Источник видео</legend><label><input type="radio" name="source" value="kinescope" checked><span><i class="ui-icon icon-link" aria-hidden="true"></i>Ссылка Кинескопа</span></label><label><input type="radio" name="source" value="upload"><span><i class="ui-icon icon-upload" aria-hidden="true"></i>Загрузить файл</span></label></fieldset>
-      <div id="kinescope-field" class="field"><label for="kinescope-url">Ссылка или ID видео <b>*</b></label><input id="kinescope-url" name="kinescopeUrl" type="text" placeholder="https://kinescope.io/…" autocomplete="off"><small>Подойдёт ссылка на ролик или его короткий ID.</small></div>
+      <div id="kinescope-field" class="field"><label for="kinescope-url">Ссылка на видео в Кинескопе <b id="kinescope-required">*</b></label><input id="kinescope-url" name="kinescopeUrl" type="text" placeholder="https://kinescope.io/…" autocomplete="off"><div class="kinescope-field-footer"><small id="kinescope-help">Подойдёт ссылка на ролик или его короткий ID.</small><a id="kinescope-open" class="source-link" target="_blank" rel="noopener noreferrer" hidden><i class="ui-icon icon-link" aria-hidden="true"></i>Открыть в Кинескопе</a></div></div>
       <div id="upload-field" class="field" hidden><label for="video-file">Видеофайл <b>*</b></label><input id="video-file" name="videoFile" type="file" accept="video/mp4,video/webm,.mp4,.webm"><small>MP4 или WebM, до 150 МБ. Файл хранится только на этом компьютере.</small></div>
       <div class="field"><label for="video-title">Название <b>*</b></label><input id="video-title" name="title" maxlength="120" required placeholder="Например, Выходные в Казани"></div>
       <div class="field"><label for="video-text">Описание</label><textarea id="video-text" name="text" maxlength="1000" rows="3" placeholder="Короткая подпись под роликом"></textarea></div>
@@ -85,7 +85,7 @@
   <dialog id="preview-dialog" class="preview-dialog" aria-labelledby="preview-title"><h2 id="preview-title" class="sr-only">Видео</h2><div id="preview-body" class="preview-body"></div><button id="preview-close" class="preview-close" type="button" aria-label="Закрыть предпросмотр"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="feed-data.js?v=1"></script>
-  <script src="admin.js?v=17"></script>
+  <script src="admin.js?v=18"></script>
   <script src="admin-sections.js?v=11"></script>
 </body>
 </html>

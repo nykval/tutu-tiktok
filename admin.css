@@ -168,6 +168,12 @@ h2 { margin: 6px 0 0; font-size: 23px; font-weight: 600; letter-spacing: -.025em
 .field input, .field textarea { width: 100%; padding: 10px 11px; border: 1px solid #d9d8e2; border-radius: 8px; outline: 0; background: #fff; color: #302d3c; font-size: 13px; }
 .field input:focus, .field textarea:focus { border-color: #8a76c5; box-shadow: 0 0 0 3px #dcd5f3; }
 .field small { display: block; margin-top: 5px; color: #9999a5; font-size: 10px; line-height: 1.4; }
+.field input[readonly] { background: #f8f7fb; color: #605a70; cursor: text; }
+.kinescope-field-footer { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; }
+.source-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 5px; color: #6450b2; font-size: 11px; font-weight: 600; text-decoration: none; }
+.source-link:hover { text-decoration: underline; }
+.source-link:focus-visible { outline: 2px solid #7866b8; outline-offset: 3px; border-radius: 3px; }
+.source-link .ui-icon { width: 13px; height: 13px; }
 .offer-fields { margin-top: 4px; padding: 15px 16px 2px; border: 1px solid #e8e5ee; border-radius: 10px; background: #fcfbfe; }
 .offer-heading { display: flex; justify-content: space-between; margin-bottom: 13px; font-size: 12px; }
 .offer-heading span { color: #a1a0ad; font-size: 10px; }
