@@ -12,6 +12,10 @@ const tagFilter = document.getElementById("filter-tag");
 const tagInput = document.getElementById("video-tags");
 const tagChipList = document.getElementById("video-tag-chips");
 const tagEditor = document.getElementById("tag-editor");
+const posterInput = document.getElementById("video-poster");
+const posterPreviewImage = document.getElementById("poster-preview-image");
+const posterPreviewEmpty = document.getElementById("poster-preview-empty");
+const posterRemoveButton = document.getElementById("poster-remove");
 const sortBy = document.getElementById("sort-by");
 const clearFiltersButton = document.getElementById("clear-filters");
 const activeFiltersCount = document.getElementById("filter-active-count");
@@ -21,6 +25,8 @@ let apiAvailable = false;
 let toastTimer;
 let modalScrollY = null;
 let videoTags = [];
+let posterRemoved = false;
+let posterObjectUrl = null;
 
 function syncModalScroll() {
   if (document.querySelector("dialog[open]")) {
@@ -338,6 +344,7 @@ function showSource() {
     ? "Ссылка собрана из ID ролика. Чтобы заменить видео, добавьте новый ролик."
     : "Подойдёт ссылка на ролик или его короткий ID.";
   document.getElementById("kinescope-open").hidden = !isEditingKinescope;
+  renderPosterPreview();
 }
 
 function kinescopeId(value) {
@@ -350,6 +357,47 @@ function kinescopeId(value) {
   }
   if (!/^[A-Za-z0-9]{10,64}$/.test(id)) throw new Error("Укажите корректную ссылку или ID Кинескопа");
   return id;
+}
+
+function releasePosterPreview() {
+  if (posterObjectUrl) URL.revokeObjectURL(posterObjectUrl);
+  posterObjectUrl = null;
+}
+
+function renderPosterPreview() {
+  const file = posterInput.files[0];
+  const savedPoster = !posterRemoved && editing?.posterUrl ? editing.posterUrl : "";
+  const isKinescope = (editing?.source || form.elements.source.value) === "kinescope";
+  let defaultPoster = "";
+  if (isKinescope) {
+    try {
+      const id = editing?.id || kinescopeId(form.elements.kinescopeUrl.value);
+      defaultPoster = `https://kinescope.io/${id}/poster.jpg`;
+    } catch (error) { /* The source link has not been entered yet. */ }
+  }
+  const imageUrl = (file && posterObjectUrl) || savedPoster || defaultPoster;
+  posterPreviewImage.hidden = !imageUrl;
+  posterPreviewEmpty.hidden = !!imageUrl;
+  posterPreviewEmpty.querySelector("span").textContent = "Нет постера";
+  if (imageUrl) posterPreviewImage.src = imageUrl;
+  else posterPreviewImage.removeAttribute("src");
+  document.getElementById("poster-choose-label").textContent = file || savedPoster ? "Заменить постер" : "Выбрать постер";
+  posterRemoveButton.hidden = !file && !savedPoster;
+  const status = document.getElementById("poster-status");
+  const hint = document.getElementById("poster-hint");
+  if (file) {
+    status.textContent = "Новый постер выбран";
+    hint.textContent = file.name;
+  } else if (savedPoster) {
+    status.textContent = "Свой постер";
+    hint.textContent = "Показывается в карточке видео и ленте.";
+  } else if (defaultPoster) {
+    status.textContent = "Обложка Кинескопа";
+    hint.textContent = posterRemoved ? "Свой постер будет убран после сохранения." : "Используется автоматически. Можно заменить своей.";
+  } else {
+    status.textContent = "Постер не задан";
+    hint.textContent = posterRemoved ? "Постер будет убран после сохранения." : isKinescope ? "Появится после ввода ссылки на видео." : "Для загруженного видео можно выбрать свою обложку.";
+  }
 }
 
 function formOffers() {
@@ -388,6 +436,8 @@ function fillOfferFromProduct(suffix) {
 function openForm(item = null) {
   editing = item;
   form.reset();
+  releasePosterPreview();
+  posterRemoved = false;
   videoTags = [...(item?.tags || [])];
   renderTagChips();
   fillVideoReferences();
@@ -429,6 +479,38 @@ form.addEventListener("change", (event) => {
   if (event.target.name === "source") showSource();
   if (event.target.name === "offerProduct") fillOfferFromProduct("");
   if (event.target.name === "offerProduct2") fillOfferFromProduct("2");
+});
+document.getElementById("poster-choose").addEventListener("click", () => posterInput.click());
+posterInput.addEventListener("change", () => {
+  const file = posterInput.files[0];
+  releasePosterPreview();
+  if (file) {
+    if (!/\.(png|jpe?g|webp)$/i.test(file.name)) {
+      posterInput.value = "";
+      toast("Поддерживаются PNG, JPEG и WebP");
+    } else if (file.size > 10 * 1024 * 1024) {
+      posterInput.value = "";
+      toast("Изображение должно быть меньше 10 МБ");
+    } else {
+      posterRemoved = false;
+      posterObjectUrl = URL.createObjectURL(file);
+    }
+  }
+  renderPosterPreview();
+});
+posterRemoveButton.addEventListener("click", () => {
+  posterInput.value = "";
+  releasePosterPreview();
+  posterRemoved = true;
+  renderPosterPreview();
+});
+form.elements.kinescopeUrl.addEventListener("input", () => {
+  if (!editing && !posterInput.files.length) renderPosterPreview();
+});
+posterPreviewImage.addEventListener("error", () => {
+  posterPreviewImage.hidden = true;
+  posterPreviewEmpty.hidden = false;
+  posterPreviewEmpty.querySelector("span").textContent = "Нет предпросмотра";
 });
 tagInput.addEventListener("keydown", (event) => {
   if (event.isComposing) return;
@@ -475,7 +557,7 @@ form.addEventListener("submit", async (event) => {
       category: form.elements.category.value,
       streamerId: form.elements.streamerId.value,
       tags: [...videoTags],
-      posterUrl: editing?.posterUrl || "",
+      posterUrl: posterRemoved ? "" : editing?.posterUrl || "",
       offers,
     };
     if (!video.title) throw new Error("Укажите название видео");
@@ -525,6 +607,8 @@ document.getElementById("dialog-close").addEventListener("click", () => dialog.c
 document.getElementById("dialog-cancel").addEventListener("click", () => dialog.close());
 dialog.addEventListener("close", () => {
   form.reset();
+  releasePosterPreview();
+  posterRemoved = false;
   videoTags = [];
   renderTagChips();
   editing = null;

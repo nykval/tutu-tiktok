@@ -4,18 +4,12 @@ let feedEnabled = true;
 const feed = document.getElementById("feed");
 const status = document.getElementById("status");
 const scrub = document.getElementById("scrub");
-const buffered = document.getElementById("buffered");
 const seek = document.getElementById("seek");
-const timeLabel = document.getElementById("time");
 const retry = document.getElementById("retry");
 
 const ICONS = {
-  soundOff: '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h3l4-4v12l-4-4H4zM16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>',
-  soundOn: '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h3l4-4v12l-4-4H4zM16 9a4 4 0 0 1 0 6M18.5 7a7 7 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  heart: '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19s-7-4.4-7-9a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 4.6-7 9-7 9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
-  heartOn: '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19s-7-4.4-7-9a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 4.6-7 9-7 9z" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
-  comment: '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17l-2 3V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
-  share: '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10M8 8l4-4 4 4M6 13v5a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  heart: '<span class="heart-icon" aria-hidden="true"></span>',
+  share: '<span class="share-icon" aria-hidden="true"></span>',
   chevron: '<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
@@ -32,8 +26,8 @@ let visibilityPaused = false;
 let seeking = false;
 let currentTime = 0;
 let currentDuration = 0;
-let bufferedSeconds = 0;
 let lastTimeUpdateAt = 0;
+const pendingProgressReads = new WeakSet();
 let playbackTimeout = 0;
 let playbackRetryTimer = 0;
 let playbackAttempts = 0;
@@ -63,6 +57,7 @@ function iconButton(action, label, svg) {
   button.className = "rail-btn";
   button.dataset.action = action;
   button.setAttribute("aria-label", label);
+  if (action === "like") button.setAttribute("aria-pressed", "false");
   button.innerHTML = svg;
   return button;
 }
@@ -101,9 +96,7 @@ function render() {
     const rail = document.createElement("div");
     rail.className = "rail";
     rail.append(
-      iconButton("sound", "Звук", ICONS.soundOn),
       iconButton("like", "Нравится", ICONS.heart),
-      iconButton("comment", "Комментарии", ICONS.comment),
       iconButton("share", "Поделиться", ICONS.share)
     );
     slide.appendChild(rail);
@@ -112,7 +105,9 @@ function render() {
     dock.className = "dock";
 
     const author = document.createElement("div");
-    author.className = "author";
+    author.className = "author bio";
+    const authorLine = document.createElement("div");
+    authorLine.className = "author-line";
     const avatar = document.createElement("span");
     avatar.className = "avatar";
     avatar.textContent = (item.streamerName || "Б").slice(0, 1).toUpperCase();
@@ -122,22 +117,23 @@ function render() {
       picture.loading = "lazy";
       avatar.replaceChildren(picture);
     }
-    const who = document.createElement("div");
-    who.className = "bio";
     const name = document.createElement("p");
     name.className = "name";
     name.textContent = item.streamerName || "Блогеры рекомендуют";
     const caption = document.createElement("p");
     caption.className = "caption";
     caption.textContent = item.text;
+    const captionLine = document.createElement("div");
+    captionLine.className = "caption-line";
     const more = document.createElement("button");
     more.type = "button";
     more.className = "more";
     more.dataset.action = "more";
     more.hidden = true;
     more.textContent = "ещё";
-    who.append(name, caption, more);
-    author.append(avatar, who);
+    authorLine.append(avatar, name);
+    captionLine.append(caption, more);
+    author.append(authorLine, captionLine);
     dock.appendChild(author);
 
     (item.offers || []).forEach((offer) => {
@@ -197,30 +193,10 @@ function playbackState(kind) {
   document.documentElement.dataset.playback = kind;
 }
 
-function paintSound() {
-  document.querySelectorAll('[data-action="sound"]').forEach((button) => {
-    button.innerHTML = muted ? ICONS.soundOff : ICONS.soundOn;
-    button.setAttribute("aria-pressed", String(!muted));
-    button.setAttribute("aria-label", muted ? "Включить звук" : "Выключить звук");
-    button.classList.toggle("needs-tap", muted && soundWanted && button.closest(".slide")?.classList.contains("is-active"));
-  });
-}
-
-async function applyMute() {
-  const current = player;
-  if (!current) { paintSound(); return; }
-  try {
-    if (soundWanted) await current.unmute();
-    else await current.mute();
-    if (current === player) muted = await current.isMuted();
-  } catch (error) {
-    if (current === player && soundWanted) muted = true;
-  }
-  paintSound();
-}
-
 let factory = null;
 let cachedPrevious = null;
+let preloadedNext = null;
+let preloadTimer = 0;
 let playerIndex = -1;
 let hostSerial = 0;
 
@@ -255,6 +231,7 @@ function createLocalPlayer(host, item, autoPlay = false) {
   video.playsInline = true;
   video.preload = "auto";
   host.appendChild(video);
+  video.load();
   return {
     Events: { Playing: "playing", Pause: "pause", Error: "error", Loaded: "loadeddata", Waiting: "waiting", Progress: "progress", TimeUpdate: "timeupdate", DurationChange: "durationchange", VolumeChange: "volumechange" },
     on: (event, callback) => video.addEventListener(event, callback),
@@ -272,18 +249,80 @@ function createLocalPlayer(host, item, autoPlay = false) {
   };
 }
 
+function discardPreload(entry) {
+  if (!entry) return;
+  entry.cancelled = true;
+  if (entry.player) entry.player.destroy().catch(() => {}).finally(() => entry.host.remove());
+}
+
+function prewarmNext() {
+  const index = active + 1;
+  if (index >= FEED.length || cachedPrevious?.index === index) return;
+  if (FEED[index].source !== "upload" && !factory) return;
+  if (preloadedNext?.index === index) return;
+  if (preloadedNext) discardPreload(preloadedNext);
+  const hostId = "play-" + (++hostSerial);
+  const host = document.createElement("div");
+  host.id = hostId;
+  slides()[index].querySelector(".player-slot").appendChild(host);
+  const entry = { index, host, player: null, cancelled: false, promise: null };
+  preloadedNext = entry;
+  const initialSoundWanted = soundWanted;
+  entry.promise = (async () => {
+    try {
+      const instance = FEED[index].source === "upload"
+        ? createLocalPlayer(host, FEED[index])
+        : await factory.create(hostId, playerOptions(FEED[index].id));
+      if (entry.cancelled) {
+        await instance.destroy().catch(() => {});
+        host.remove();
+        return null;
+      }
+      entry.player = instance;
+      if (initialSoundWanted !== soundWanted) {
+        (soundWanted ? instance.unmute() : instance.mute()).catch(() => {});
+      }
+      instance.on(instance.Events.Playing, () => {
+        if (instance !== player) instance.pause().catch(() => {});
+      });
+      return instance;
+    } catch (error) {
+      host.remove();
+      if (preloadedNext === entry) preloadedNext = null;
+      return null;
+    }
+  })();
+}
+
+function schedulePreload(token, delay = 180) {
+  clearTimeout(preloadTimer);
+  preloadTimer = setTimeout(() => {
+    if (token === generation && player && !userPaused && !document.hidden) prewarmNext();
+  }, delay);
+}
+
+const boundPlayerTokens = new WeakMap();
+
 function bindPlayer(instance, token) {
+  if (boundPlayerTokens.has(instance)) {
+    boundPlayerTokens.set(instance, token);
+    return;
+  }
+  boundPlayerTokens.set(instance, token);
+  const currentToken = () => boundPlayerTokens.get(instance);
   if (instance.Events.VolumeChange) instance.on(instance.Events.VolumeChange, (event) => {
-    if (token !== generation || instance !== player) return;
+    if (currentToken() !== generation || instance !== player) return;
     if (typeof event.data?.muted === "boolean") {
       muted = event.data.muted;
-      paintSound();
     }
   });
   if (instance.Events.Loaded) instance.on(instance.Events.Loaded, () => {
-    if (token === generation && instance === player && !hasFrame && !userPaused) startPlayback(instance);
+    if (currentToken() !== generation || instance !== player) return;
+    refreshProgress(instance, currentToken());
+    if (!hasFrame && !userPaused) startPlayback(instance);
   });
   instance.on(instance.Events.Playing, () => {
+    const token = currentToken();
     if (token !== generation) {
       if (instance !== player) instance.pause().catch(() => {});
       return;
@@ -291,6 +330,7 @@ function bindPlayer(instance, token) {
     markPlaying(instance, token);
   });
   instance.on(instance.Events.Pause, () => {
+    const token = currentToken();
     if (token !== generation) return;
     if (userPaused || visibilityPaused || document.hidden) playbackState("paused");
     else if (instance === player) {
@@ -300,29 +340,29 @@ function bindPlayer(instance, token) {
     }
   });
   if (instance.Events.Waiting) instance.on(instance.Events.Waiting, () => {
+    const token = currentToken();
     if (token === generation && !userPaused && !document.hidden) {
       playbackState("buffering");
       watchForStall(token);
     }
   });
-  if (instance.Events.Progress) instance.on(instance.Events.Progress, (event) => {
-    if (token !== generation) return;
-    const bufferedTime = event.data?.bufferedTime ?? (event.target?.buffered?.length ? event.target.buffered.end(event.target.buffered.length - 1) : 0);
-    if (Number.isFinite(bufferedTime)) bufferedSeconds = bufferedTime;
-    paintProgress();
-  });
   if (instance.Events.TimeUpdate) instance.on(instance.Events.TimeUpdate, (event) => {
-    if (token !== generation) return;
-    lastTimeUpdateAt = Date.now();
-    paintProgress(event.data?.currentTime ?? event.target?.currentTime);
+    if (currentToken() !== generation) return;
+    const time = event.data?.currentTime ?? event.target?.currentTime;
+    if (Number.isFinite(time)) {
+      lastTimeUpdateAt = Date.now();
+      paintProgress(time);
+      if (!playbackConfirmed && time > 0 && !userPaused && instance === player) markPlaying(instance, currentToken());
+    }
   });
   if (instance.Events.DurationChange) instance.on(instance.Events.DurationChange, (event) => {
-    if (token !== generation) return;
-    currentDuration = event.data?.duration ?? event.target?.duration ?? currentDuration;
+    if (currentToken() !== generation) return;
+    const duration = event.data?.duration ?? event.target?.duration;
+    if (Number.isFinite(duration) && duration > 0) currentDuration = duration;
     paintProgress();
   });
   instance.on(instance.Events.Error, () => {
-    if (token !== generation) return;
+    if (currentToken() !== generation) return;
     showPlaybackError("Не удалось загрузить видео.");
   });
 }
@@ -338,11 +378,12 @@ function markPlaying(instance, token) {
   status.hidden = true;
   retry.hidden = true;
   revealActive();
+  if (preloadedNext?.index !== active + 1) schedulePreload(token, 0);
+  refreshProgress(instance, token);
   if (userPaused || document.hidden) instance.pause().catch(() => {});
   else instance.isMuted().then((value) => {
     if (token === generation && instance === player) {
       muted = value;
-      paintSound();
     }
   }).catch(() => {});
 }
@@ -353,7 +394,15 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
     if (token !== generation || instance !== player || userPaused || document.hidden) return;
     try {
       if (!(await instance.isPaused())) {
-        markPlaying(instance, token);
+        if (token !== generation || instance !== player || userPaused || document.hidden) return;
+        const time = await instance.getCurrentTime();
+        if (token !== generation || instance !== player || userPaused || document.hidden) return;
+        if (Number.isFinite(time) && time > 0) {
+          markPlaying(instance, token);
+          paintProgress(time);
+          return;
+        }
+        schedulePlaybackCheck(instance, token, 500);
         return;
       }
     } catch (error) { /* плеер может ещё загружаться */ }
@@ -391,6 +440,7 @@ function show(index) {
   }
   const previous = player;
   if (previous) previous.pause().catch(() => {});
+  clearTimeout(preloadTimer);
   const cachedReturn = cachedPrevious?.index === next;
   active = next;
   hasFrame = cachedReturn;
@@ -399,16 +449,13 @@ function show(index) {
   visibilityPaused = false;
   currentDuration = 0;
   currentTime = 0;
-  bufferedSeconds = 0;
   lastTimeUpdateAt = 0;
   seek.value = "0";
+  seek.setAttribute("aria-valuetext", "Видео загружается");
   scrub.style.width = "0%";
-  buffered.style.width = "0%";
-  timeLabel.textContent = "00:00";
   recordEvent("view");
   slides().forEach((slide, i) => slide.classList.toggle("is-active", i === active));
   muted = !soundWanted;
-  paintSound();
   revealActive();
   playbackState("buffering");
   status.hidden = true;
@@ -448,7 +495,6 @@ async function startPlayback(instance) {
           try {
             await instance.mute();
             muted = true;
-            paintSound();
             await instance.play();
           } catch (fallbackError) {
             if (fallbackError?.name === "NotAllowedError") {
@@ -472,11 +518,6 @@ async function startPlayback(instance) {
       try { await instance.pause(); } catch (error) { /* ролик уже закрыт */ }
       return;
     }
-    if (!playbackConfirmed) {
-      try {
-        if (!(await instance.isPaused())) markPlaying(instance, token);
-      } catch (error) { /* событие Playing подтвердит запуск */ }
-    }
   })();
   startRequest = { instance, token, promise };
   try { await promise; }
@@ -490,6 +531,12 @@ async function openVideo(index, token) {
   if (token !== generation || (FEED[index].source !== "upload" && !factory)) return;
   const returning = cachedPrevious?.index === index ? cachedPrevious : null;
   if (returning) cachedPrevious = null;
+  const warmed = !returning && preloadedNext?.index === index ? preloadedNext : null;
+  if (warmed) preloadedNext = null;
+  else if (preloadedNext) {
+    discardPreload(preloadedNext);
+    preloadedNext = null;
+  }
   if (player) {
     const outgoing = { index: playerIndex, player };
     player = null;
@@ -501,17 +548,27 @@ async function openVideo(index, token) {
       cachedPrevious = outgoing;
     }
   }
-  if (token !== generation) return;
-  if (returning) {
-    player = returning.player;
-    playerIndex = index;
-    bindPlayer(player, token);
-  } else {
+  if (token !== generation) {
+    if (warmed) discardPreload(warmed);
+    if (returning) returning.player.destroy().catch(() => {});
+    return;
+  }
+  if (cachedPrevious && Math.abs(cachedPrevious.index - index) > 1) {
+    cachedPrevious.player.destroy().catch(() => {});
+    cachedPrevious = null;
+  }
+  let instance = returning?.player || (warmed ? await warmed.promise : null);
+  if (token !== generation) {
+    if (instance && !returning) await instance.destroy().catch(() => {});
+    if (returning) await returning.player.destroy().catch(() => {});
+    warmed?.host.remove();
+    return;
+  }
+  if (!instance) {
     const hostId = "play-" + (++hostSerial);
     const host = document.createElement("div");
     host.id = hostId;
     slides()[index].querySelector(".player-slot").appendChild(host);
-    let instance;
     try {
       instance = FEED[index].source === "upload"
         ? createLocalPlayer(host, FEED[index], token === 1)
@@ -525,11 +582,12 @@ async function openVideo(index, token) {
       host.remove();
       return;
     }
-    player = instance;
-    playerIndex = index;
-    bindPlayer(instance, token);
   }
-  const instance = player;
+  player = instance;
+  playerIndex = index;
+  bindPlayer(instance, token);
+  refreshProgress(instance, token, true);
+  schedulePreload(token);
   document.documentElement.dataset.player = "ready";
   status.hidden = true;
   await startPlayback(instance);
@@ -547,7 +605,7 @@ function boot(nextFactory) {
     retry.hidden = true;
     playbackState("buffering");
     mount(active);
-  }
+  } else if (player && playbackConfirmed) schedulePreload(generation);
 }
 
 function fitCaptions() {
@@ -556,8 +614,10 @@ function fitCaptions() {
     const more = bio.querySelector(".more");
     const wasOpen = bio.classList.contains("is-open");
     bio.classList.remove("is-open");
-    const overflow = caption.scrollHeight > caption.clientHeight + 1;
-    if (wasOpen) bio.classList.add("is-open");
+    more.hidden = true;
+    const overflow = caption.scrollWidth > caption.clientWidth + 1;
+    if (wasOpen && overflow) bio.classList.add("is-open");
+    more.textContent = wasOpen && overflow ? "свернуть" : "ещё";
     more.hidden = !overflow;
   });
 }
@@ -600,15 +660,14 @@ async function loadFeed() {
 loadFeed();
 window.addEventListener("resize", fitCaptions);
 
-let scrollTimer = 0;
+let scrollFrame = 0;
 feed.addEventListener("scroll", () => {
-  clearTimeout(scrollTimer);
-  scrollTimer = setTimeout(() => {
+  if (scrollFrame) return;
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = 0;
     const index = indexFromScroll();
-    const aligned = Math.abs(feed.scrollTop - index * feed.clientHeight) < feed.clientHeight * 0.15;
-    if (!aligned) return;
-    show(index);
-  }, 80);
+    if (index !== active) show(index);
+  });
 }, { passive: true });
 
 async function togglePlayback() {
@@ -654,12 +713,9 @@ document.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-action]");
   if (action) {
     const kind = action.dataset.action;
-    if (kind === "sound") {
-      soundWanted = muted;
-      await applyMute();
-    } else if (kind === "like") {
+    if (kind === "like") {
       const on = action.classList.toggle("is-on");
-      action.innerHTML = on ? ICONS.heartOn : ICONS.heart;
+      action.setAttribute("aria-pressed", String(on));
       if (on) recordEvent("like");
     } else if (kind === "share" && navigator.share) {
       navigator.share({ title: "Тревел лента", url: location.href }).catch(() => {});
@@ -671,6 +727,14 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (!event.target.closest("#feed") || event.target.closest("a") || !player) return;
+  if (muted && soundWanted) {
+    const currentPlayer = player;
+    try {
+      await currentPlayer.unmute();
+      if (currentPlayer === player) muted = await currentPlayer.isMuted();
+    } catch (error) { /* браузер может запретить звук до следующего действия */ }
+    return;
+  }
   await togglePlayback();
 });
 
@@ -683,44 +747,61 @@ function formatTime(seconds) {
 
 function paintProgress(time = currentTime) {
   if (Number.isFinite(time)) currentTime = time;
-  buffered.style.width = currentDuration > 0 ? `${Math.max(0, Math.min(100, bufferedSeconds / currentDuration * 100))}%` : "0%";
   if (seeking) return;
   const progress = currentDuration > 0 ? Math.max(0, Math.min(1, currentTime / currentDuration)) : 0;
-  timeLabel.textContent = formatTime(currentTime);
   scrub.style.width = `${progress * 100}%`;
   seek.value = String(Math.round(progress * 1000));
+  seek.setAttribute("aria-valuetext", currentDuration > 0 ? `${formatTime(currentTime)} из ${formatTime(currentDuration)}` : "Видео загружается");
 }
 
-setInterval(async () => {
-  if (!player || document.hidden || Date.now() - lastTimeUpdateAt < 3500) return;
-  const currentPlayer = player;
+async function refreshProgress(instance, token, includeTime = false) {
+  if (!instance || pendingProgressReads.has(instance)) return;
+  pendingProgressReads.add(instance);
+  const eventAtStart = lastTimeUpdateAt;
   try {
-    const current = await currentPlayer.getCurrentTime();
-    const duration = await currentPlayer.getDuration();
-    if (currentPlayer !== player) return;
-    currentDuration = Number.isFinite(duration) ? duration : 0;
-    paintProgress(current);
+    const [timeResult, durationResult] = await Promise.allSettled([
+      includeTime || Date.now() - lastTimeUpdateAt > 1500 ? instance.getCurrentTime() : Promise.resolve(undefined),
+      currentDuration > 0 ? Promise.resolve(undefined) : instance.getDuration(),
+    ]);
+    if (token !== generation || instance !== player) return;
+    const duration = durationResult.status === "fulfilled" ? durationResult.value : undefined;
+    if (Number.isFinite(duration) && duration > 0) currentDuration = duration;
+    const time = timeResult.status === "fulfilled" ? timeResult.value : undefined;
+    if (Number.isFinite(time) && lastTimeUpdateAt === eventAtStart) paintProgress(time);
+    else paintProgress();
   } catch (error) {
-    /* плеер ещё переключается */
+    /* плеер ещё не готов ответить; следующая проверка повторит запрос */
+  } finally {
+    pendingProgressReads.delete(instance);
   }
-}, 2000);
+}
+
+setInterval(() => {
+  if (!player || document.hidden || (currentDuration > 0 && Date.now() - lastTimeUpdateAt < 1500)) return;
+  refreshProgress(player, generation);
+}, 1000);
 
 seek.addEventListener("pointerdown", () => { seeking = true; });
 seek.addEventListener("input", () => {
   seeking = true;
   const progress = Number(seek.value) / 1000;
   scrub.style.width = progress * 100 + "%";
-  timeLabel.textContent = formatTime(progress * currentDuration);
+  seek.setAttribute("aria-valuetext", currentDuration > 0 ? `${formatTime(progress * currentDuration)} из ${formatTime(currentDuration)}` : `${Math.round(progress * 100)}%`);
 });
 seek.addEventListener("change", async () => {
   const currentPlayer = player;
+  const targetTime = Number(seek.value) / 1000 * currentDuration;
   if (currentPlayer && currentDuration > 0) {
-    try { await currentPlayer.seekTo(Number(seek.value) / 1000 * currentDuration); }
+    try {
+      await currentPlayer.seekTo(targetTime);
+      if (currentPlayer === player) currentTime = targetTime;
+    }
     catch (error) { /* некоторые ролики ещё не допускают перемотку */ }
   }
   seeking = false;
+  if (currentPlayer === player) paintProgress();
 });
-seek.addEventListener("pointercancel", () => { seeking = false; });
+seek.addEventListener("pointercancel", () => { seeking = false; paintProgress(); });
 
 document.addEventListener("visibilitychange", async () => {
   const currentPlayer = player;
