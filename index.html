@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>ТУТУТИКТОК — тревел лента</title>
+  <link rel="icon" type="image/png" href="assets/brand/tututiktok-badge-transparent.png" />
+  <link rel="icon" type="image/svg+xml" href="assets/brand/favicon.svg" />
+  <link rel="apple-touch-icon" href="assets/brand/tututiktok-badge-transparent.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preconnect" href="https://kinescope.io" crossorigin />
+  <link rel="preconnect" href="https://player.kinescope.io" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="feed.css?v=22" />
+</head>
+<body>
+  <main class="phone">
+    <div class="frame">
+      <div class="feed" id="feed" tabindex="0"></div>
+      <header class="topbar">
+        <a class="icon" href="admin.html" target="_top" aria-label="Вернуться в админку">
+          <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </a>
+        <p class="brand"><img src="assets/brand/tututiktok-logo.png" alt="ТУТУТИКТОК" /></p>
+        <span class="icon" aria-hidden="true"></span>
+      </header>
+      <div class="scrub">
+        <div class="scrub-bar"><div class="scrub-buffered" id="buffered"></div><div class="scrub-fill" id="scrub"></div><input id="seek" class="seek" type="range" min="0" max="1000" value="0" aria-label="Перемотать видео" /></div>
+        <span id="time">00:00</span>
+      </div>
+      <p class="status" id="status" hidden></p>
+      <button class="retry-button" id="retry" type="button" hidden>Повторить</button>
+    </div>
+  </main>
+  <script>
+    window.onKinescopeIframeAPIReady = window.onKinescopeIframeApiReady = function (factory) {
+      window.__kinescopeFactory = factory;
+      window.dispatchEvent(new Event("kinescope-ready"));
+    };
+  </script>
+  <script src="https://player.kinescope.io/latest/iframe.player.js"></script>
+  <script src="feed-data.js?v=1"></script>
+  <script src="feed.js?v=24"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ТУТУТИКТОК">
+  <rect width="512" height="512" rx="112" fill="#8d64f6"/>
+  <path d="M169 93C139 75 105 96 105 132V380C105 416 139 437 169 419L402 281C426 267 426 245 402 231Z" fill="#fff"/>
+  <rect x="220" y="157" width="61" height="200" rx="30" fill="#8d64f6"/>
+  <rect x="174" y="210" width="153" height="57" rx="20" fill="#8d64f6"/>
+</svg>
