@@ -757,6 +757,7 @@ async function togglePlayback() {
     if (userPaused) {
       userPaused = false;
       playbackConfirmed = false;
+      playbackAttempts = 0;
       playbackState("buffering");
       watchForStall(generation);
       await startPlayback(currentPlayer);
@@ -765,6 +766,7 @@ async function togglePlayback() {
     if (await currentPlayer.isPaused()) {
       userPaused = false;
       playbackConfirmed = false;
+      playbackAttempts = 0;
       playbackState("buffering");
       watchForStall(generation);
       await startPlayback(currentPlayer);
@@ -810,10 +812,20 @@ document.addEventListener("click", async (event) => {
   if (!event.target.closest("#feed") || event.target.closest("a") || !player) return;
   if (muted && soundWanted) {
     const currentPlayer = player;
+    const shouldResume = userPaused || await currentPlayer.isPaused().catch(() => false);
+    if (currentPlayer !== player) return;
     try {
       await currentPlayer.unmute();
       if (currentPlayer === player) muted = await currentPlayer.isMuted();
     } catch (error) { /* браузер может запретить звук до следующего действия */ }
+    if (shouldResume && currentPlayer === player) {
+      userPaused = false;
+      playbackConfirmed = false;
+      playbackAttempts = 0;
+      playbackState("buffering");
+      watchForStall(generation);
+      await startPlayback(currentPlayer);
+    }
     return;
   }
   await togglePlayback();
@@ -889,12 +901,16 @@ document.addEventListener("visibilitychange", async () => {
   if (!currentPlayer) return;
   if (document.hidden) {
     visibilityPaused = !userPaused;
+    clearTimeout(playbackTimeout);
+    playbackTimeout = 0;
+    clearTimeout(playbackRetryTimer);
     try {
       if (!(await currentPlayer.isPaused())) await currentPlayer.pause();
     } catch (error) { /* плеер уже переключается */ }
   } else if (visibilityPaused && !userPaused && currentPlayer === player) {
     visibilityPaused = false;
     playbackConfirmed = false;
+    playbackAttempts = 0;
     playbackState("buffering");
     watchForStall(generation);
     await startPlayback(currentPlayer);
