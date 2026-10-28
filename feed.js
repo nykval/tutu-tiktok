@@ -33,6 +33,8 @@ let playbackRetryTimer = 0;
 let playbackAttempts = 0;
 let playbackConfirmed = false;
 let mutedAutoplayFallbackTried = false;
+let recoveryCount = 0;
+let bandwidthTimer = 0;
 
 function recordEvent(type, item = FEED[active]) {
   if (!analyticsReady || !item) return;
@@ -237,7 +239,14 @@ let playerIndex = -1;
 let hostSerial = 0;
 let scrollDirection = 1;
 
-function playerOptions(id, autoPlay = false) {
+function qualityCap() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (connection?.saveData || /2g/.test(connection?.effectiveType || "")) return 360;
+  if (recoveryCount || connection?.effectiveType === "3g") return 480;
+  return 720;
+}
+
+function playerOptions(id, autoPlay = false, preload = "auto") {
   return {
     url: "https://kinescope.io/" + id,
     size: { width: "100%", height: "100%" },
@@ -246,7 +255,8 @@ function playerOptions(id, autoPlay = false) {
       muted: !soundWanted,
       loop: true,
       playsInline: true,
-      preload: "auto",
+      preload,
+      maxAbrQuality: qualityCap(),
       keyboard: false,
       autoPause: false,
       localStorage: { time: false, quality: false },
@@ -259,14 +269,14 @@ function playerOptions(id, autoPlay = false) {
   };
 }
 
-function createLocalPlayer(host, item, autoPlay = false) {
+function createLocalPlayer(host, item, autoPlay = false, preload = "auto") {
   const video = document.createElement("video");
   video.src = item.mediaUrl;
   video.muted = !soundWanted;
   video.autoplay = autoPlay;
   video.loop = true;
   video.playsInline = true;
-  video.preload = "auto";
+  video.preload = preload;
   host.appendChild(video);
   video.load();
   return {
@@ -290,6 +300,34 @@ function discardPreload(entry) {
   if (!entry) return;
   entry.cancelled = true;
   if (entry.player) entry.player.destroy().catch(() => {}).finally(() => entry.host.remove());
+  else entry.host.remove();
+}
+
+async function createKinescopePlayer(hostId, options, timeoutMs) {
+  let timer = 0;
+  let expired = false;
+  const pending = factory.create(hostId, options);
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      expired = true;
+      reject(new Error("Плеер не ответил вовремя"));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([pending, deadline]);
+  } finally {
+    clearTimeout(timer);
+    if (expired) pending.then((instance) => instance.destroy().catch(() => {})).catch(() => {});
+  }
+}
+
+async function takePreparedPlayer(entry) {
+  let timer = 0;
+  const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(null), 2200); });
+  const instance = await Promise.race([entry.promise, deadline]);
+  clearTimeout(timer);
+  if (!instance) discardPreload(entry);
+  return instance;
 }
 
 function prewarmNeighbor(offset) {
@@ -304,11 +342,12 @@ function prewarmNeighbor(offset) {
   const entry = { index, host, player: null, cancelled: false, promise: null };
   preloadedNeighbors.set(index, entry);
   const initialSoundWanted = soundWanted;
+  const preload = offset === scrollDirection ? "auto" : "metadata";
   entry.promise = (async () => {
     try {
       const instance = FEED[index].source === "upload"
-        ? createLocalPlayer(host, FEED[index])
-        : await factory.create(hostId, playerOptions(FEED[index].id));
+        ? createLocalPlayer(host, FEED[index], false, preload)
+        : await createKinescopePlayer(hostId, playerOptions(FEED[index].id, false, preload), 8000);
       if (entry.cancelled) {
         await instance.destroy().catch(() => {});
         host.remove();
@@ -340,6 +379,13 @@ function prewarmNeighbors() {
   }
 }
 
+function releasePreloads() {
+  clearTimeout(preloadTimer);
+  preloadTimer = 0;
+  for (const entry of preloadedNeighbors.values()) discardPreload(entry);
+  preloadedNeighbors.clear();
+}
+
 function prunePreloads(index) {
   for (const [preparedIndex, entry] of preloadedNeighbors) {
     if (preparedIndex !== index && preparedIndex >= index - 1 && preparedIndex <= index + 2 &&
@@ -360,6 +406,20 @@ function schedulePreload(token, delay = 500) {
 function hasPreparedNeighbor(index) {
   return index < 0 || index >= FEED.length || cachedPrevious?.index === index ||
     preloadedNeighbors.has(index);
+}
+
+function beginBuffering(token) {
+  if (token !== generation) return;
+  playbackConfirmed = false;
+  playbackState("buffering");
+  clearTimeout(preloadTimer);
+  preloadTimer = 0;
+  watchForStall(token);
+  clearTimeout(bandwidthTimer);
+  bandwidthTimer = setTimeout(() => {
+    bandwidthTimer = 0;
+    if (token === generation && !playbackConfirmed && !document.hidden) releasePreloads();
+  }, 1200);
 }
 
 const boundPlayerTokens = new WeakMap();
@@ -395,16 +455,14 @@ function bindPlayer(instance, token) {
     if (token !== generation) return;
     if (userPaused || visibilityPaused || document.hidden) playbackState("paused");
     else if (instance === player) {
-      playbackConfirmed = false;
-      playbackState("buffering");
+      beginBuffering(token);
       schedulePlaybackCheck(instance, token, 350);
     }
   });
   if (instance.Events.Waiting) instance.on(instance.Events.Waiting, () => {
     const token = currentToken();
     if (token === generation && !userPaused && !document.hidden) {
-      playbackState("buffering");
-      watchForStall(token);
+      beginBuffering(token);
     }
   });
   if (instance.Events.TimeUpdate) instance.on(instance.Events.TimeUpdate, (event) => {
@@ -422,9 +480,10 @@ function bindPlayer(instance, token) {
     if (Number.isFinite(duration) && duration > 0) currentDuration = duration;
     paintProgress();
   });
-  instance.on(instance.Events.Error, () => {
-    if (currentToken() !== generation) return;
-    showPlaybackError("Не удалось загрузить видео.");
+  instance.on(instance.Events.Error, (event) => {
+    if (currentToken() !== generation || instance !== player) return;
+    document.documentElement.dataset.playerError = String(event?.data?.error?.message || event?.data?.error || "Kinescope player error");
+    failPlayback("Не удалось загрузить видео.");
   });
 }
 
@@ -434,6 +493,8 @@ function markPlaying(instance, token) {
   clearTimeout(playbackTimeout);
   playbackTimeout = 0;
   clearTimeout(playbackRetryTimer);
+  clearTimeout(bandwidthTimer);
+  bandwidthTimer = 0;
   playbackAttempts = 0;
   playbackConfirmed = true;
   hasFrame = true;
@@ -442,7 +503,7 @@ function markPlaying(instance, token) {
   retry.hidden = true;
   revealActive();
   if (firstConfirmation && (!hasPreparedNeighbor(active + 1) || !hasPreparedNeighbor(active + 2) ||
-      !hasPreparedNeighbor(active - 1))) schedulePreload(token);
+      !hasPreparedNeighbor(active - 1))) schedulePreload(token, recoveryCount ? 4000 : 500);
   refreshProgress(instance, token);
   if (userPaused || document.hidden) instance.pause().catch(() => {});
   else instance.isMuted().then((value) => {
@@ -481,7 +542,7 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
       } catch (error) { /* плеер может ещё загружаться */ }
     }
     if (playbackAttempts >= 3) {
-      // A paused iframe may still be fetching its first segment. Wait for Playing or the stall deadline.
+      // Плеер может оставаться на паузе, пока загружает первый сегмент.
       schedulePlaybackCheck(instance, token, 2000);
       return;
     }
@@ -490,21 +551,39 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
 }
 
 function showPlaybackError(message) {
+  releasePreloads();
   clearTimeout(playbackTimeout);
   playbackTimeout = 0;
   clearTimeout(playbackRetryTimer);
+  clearTimeout(bandwidthTimer);
+  bandwidthTimer = 0;
   playbackState("error");
   status.textContent = message;
   status.hidden = false;
   retry.hidden = false;
 }
 
+function failPlayback(message) {
+  if (recoveryCount === 0 && !userPaused && !document.hidden) {
+    recoveryCount = 1;
+    releasePreloads();
+    if (cachedPrevious) cachedPrevious.player.destroy().catch(() => {});
+    cachedPrevious = null;
+    status.hidden = true;
+    retry.hidden = true;
+    playbackState("buffering");
+    mount(active);
+    return;
+  }
+  showPlaybackError(message);
+}
+
 function watchForStall(token) {
   if (playbackTimeout) return;
   playbackTimeout = setTimeout(() => {
     playbackTimeout = 0;
-    if (token === generation && !userPaused && !document.hidden) showPlaybackError("Видео загружается слишком долго.");
-  }, 20000);
+    if (token === generation && !userPaused && !document.hidden) failPlayback("Видео загружается слишком долго.");
+  }, recoveryCount ? 16000 : 12000);
 }
 
 let mountingIndex = -1;
@@ -515,6 +594,7 @@ function show(index) {
     return;
   }
   if (next !== active) scrollDirection = next > active ? 1 : -1;
+  if (next !== active) recoveryCount = 0;
   const previous = player;
   if (previous) previous.pause().catch(() => {});
   clearTimeout(preloadTimer);
@@ -550,11 +630,12 @@ function mount(index) {
   clearTimeout(playbackTimeout);
   playbackTimeout = 0;
   watchForStall(token);
+  beginBuffering(token);
   openVideo(index, token)
     .catch((error) => {
       if (token !== generation) return;
-      showPlaybackError("Ролик не открылся.");
       document.documentElement.dataset.playerError = error && error.message ? error.message : String(error);
+      failPlayback("Ролик не открылся.");
     })
     .then(() => {
       if (token === generation) mountingIndex = -1;
@@ -638,7 +719,7 @@ async function openVideo(index, token) {
     cachedPrevious = null;
   }
   prunePreloads(index);
-  let instance = returning?.player || (warmed ? await warmed.promise : null);
+  let instance = returning?.player || (warmed ? await takePreparedPlayer(warmed) : null);
   if (token !== generation) {
     if (instance && !returning) await instance.destroy().catch(() => {});
     if (returning) await returning.player.destroy().catch(() => {});
@@ -653,7 +734,7 @@ async function openVideo(index, token) {
     try {
       instance = FEED[index].source === "upload"
         ? createLocalPlayer(host, FEED[index], token === 1)
-        : await factory.create(hostId, playerOptions(FEED[index].id, token === 1));
+        : await createKinescopePlayer(hostId, playerOptions(FEED[index].id, token === 1), 12000);
     } catch (error) {
       host.remove();
       throw error;
@@ -784,6 +865,7 @@ retry.addEventListener("click", () => {
   if (!factory && FEED[active]?.source !== "upload") { location.reload(); return; }
   status.hidden = true;
   retry.hidden = true;
+  recoveryCount = 0;
   userPaused = false;
   hasFrame = false;
   revealActive();
