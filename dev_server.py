@@ -210,7 +210,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.error_response(404, "Не найдено")
         try:
             body = self.read_json()
-            allowed = {"active", "title", "text", "collection", "offers", "category", "tags", "streamerId", "posterUrl"}
+            allowed = {"active", "title", "text", "offers", "category", "tags", "streamerId", "posterUrl"}
             if not body or set(body) - allowed:
                 raise ValueError("Неизвестные поля видео")
             if "active" in body and type(body["active"]) is not bool:
@@ -288,16 +288,14 @@ class Handler(SimpleHTTPRequestHandler):
 
     def validate_metadata(self, body, required=False):
         result = {}
-        for key, maximum in (("title", 120), ("text", 1000), ("collection", 80), ("category", 80), ("streamerId", 64)):
+        for key, maximum in (("title", 120), ("text", 1000), ("category", 80), ("streamerId", 64)):
             if key in body or (required and key == "title"):
                 value = body.get(key, "")
                 if not isinstance(value, str) or len(value.strip()) > maximum or (key == "title" and not value.strip()):
-                    raise ValueError("Проверьте название, описание и коллекцию")
+                    raise ValueError("Проверьте название и описание видео")
                 result[key] = value.strip()
         if required and "text" not in result:
             result["text"] = result["title"]
-        if required and "collection" not in result:
-            result["collection"] = ""
         if "tags" in body or required:
             tags = body.get("tags", [])
             if not isinstance(tags, list) or len(tags) > 10 or any(not isinstance(tag, str) or not tag.strip() or len(tag.strip()) > 40 for tag in tags):

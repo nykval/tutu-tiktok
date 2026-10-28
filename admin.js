@@ -5,7 +5,6 @@ const search = document.getElementById("search");
 const previewDialog = document.getElementById("preview-dialog");
 const statusFilter = document.getElementById("filter-status");
 const sourceFilter = document.getElementById("filter-source");
-const collectionFilter = document.getElementById("filter-collection");
 const categoryFilter = document.getElementById("filter-category");
 const streamerFilter = document.getElementById("filter-streamer");
 const productFilter = document.getElementById("filter-product");
@@ -182,7 +181,6 @@ function renderCard(item) {
   const description = (repeatsTitle ? rawDescription.slice(item.title.length).replace(/^[.。!！?？:：\s–—-]+/, "") : rawDescription).trim();
   if (description) info.append(el("p", "video-text", description));
   const meta = el("div", "card-meta");
-  if (item.collection) meta.append(el("span", "meta-chip", item.collection));
   const author = (state.streamers || []).find((person) => person.id === item.streamerId);
   if (item.tags?.length) {
     const tags = el("span", "meta-chip meta-tags", item.tags.join(", "));
@@ -236,12 +234,8 @@ function renderCard(item) {
 
 function render() {
   const videos = allVideos();
-  const previousCollection = collectionFilter.value;
   const previousStreamer = streamerFilter.value;
   const previousProduct = productFilter.value;
-  const collections = [...new Set(videos.map((item) => item.collection).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
-  collectionFilter.replaceChildren(new Option("Все коллекции", "all"), ...collections.map((name) => new Option(name, name)));
-  collectionFilter.value = collections.includes(previousCollection) ? previousCollection : "all";
   streamerFilter.replaceChildren(new Option("Все авторы", "all"), ...(state.streamers || []).map((item) => new Option(item.name, item.id)));
   streamerFilter.value = [...streamerFilter.options].some((item) => item.value === previousStreamer) ? previousStreamer : "all";
   productFilter.replaceChildren(new Option("Все товары", "all"), ...(state.products || []).map((item) => new Option(`${item.sku} · ${item.title}`, item.id)));
@@ -249,11 +243,10 @@ function render() {
   const query = search.value.trim().toLocaleLowerCase("ru");
   const tag = tagFilter.value.trim().toLocaleLowerCase("ru");
   const filtered = videos.filter((item) => {
-    const searchable = `${item.id} ${item.title} ${item.text} ${item.collection || ""} ${(item.tags || []).join(" ")} ${(item.offers || []).map((offer) => offer.title).join(" ")}`.toLocaleLowerCase("ru");
+    const searchable = `${item.id} ${item.title} ${item.text} ${(item.tags || []).join(" ")} ${(item.offers || []).map((offer) => offer.title).join(" ")}`.toLocaleLowerCase("ru");
     return searchable.includes(query)
       && (statusFilter.value === "all" || item.active === (statusFilter.value === "active"))
       && (sourceFilter.value === "all" || item.source === sourceFilter.value)
-      && (collectionFilter.value === "all" || item.collection === collectionFilter.value)
       && (categoryFilter.value === "all" || item.category === categoryFilter.value)
       && (streamerFilter.value === "all" || item.streamerId === streamerFilter.value)
       && (productFilter.value === "all" || (item.offers || []).some((offer) => offer.productId === productFilter.value))
@@ -270,12 +263,12 @@ function render() {
   document.getElementById("video-count").textContent = String(videos.length);
   document.getElementById("result-count").textContent = `Показано ${filtered.length} из ${videos.length}`;
   document.getElementById("empty-state").hidden = filtered.length > 0;
-  const activeFilters = [statusFilter, sourceFilter, collectionFilter, categoryFilter, streamerFilter, productFilter].filter((control) => control.value !== "all").length
+  const activeFilters = [statusFilter, sourceFilter, categoryFilter, streamerFilter, productFilter].filter((control) => control.value !== "all").length
     + Number(!!tag) + Number(sortMode !== "order") + Number(!!query);
   activeFiltersCount.textContent = String(activeFilters);
   activeFiltersCount.hidden = activeFilters === 0;
   clearFiltersButton.disabled = activeFilters === 0;
-  for (const control of [statusFilter, sourceFilter, collectionFilter, categoryFilter, streamerFilter, productFilter]) {
+  for (const control of [statusFilter, sourceFilter, categoryFilter, streamerFilter, productFilter]) {
     control.closest(".filter-field").classList.toggle("is-active", control.value !== "all");
   }
   tagFilter.closest(".filter-field").classList.toggle("is-active", !!tag);
@@ -287,7 +280,6 @@ function clearFilters() {
   search.value = "";
   statusFilter.value = "all";
   sourceFilter.value = "all";
-  collectionFilter.value = "all";
   categoryFilter.value = "all";
   streamerFilter.value = "all";
   productFilter.value = "all";
@@ -373,7 +365,6 @@ function openForm(item = null) {
     }
     form.elements.title.value = item.title;
     form.elements.text.value = item.text || "";
-    form.elements.collection.value = item.collection || "";
     form.elements.category.value = item.category || "";
     form.elements.streamerId.value = item.streamerId || "";
     form.elements.tags.value = (item.tags || []).join(", ");
@@ -413,7 +404,6 @@ form.addEventListener("submit", async (event) => {
       source,
       title: form.elements.title.value.trim(),
       text: form.elements.text.value.trim(),
-      collection: form.elements.collection.value.trim(),
       category: form.elements.category.value,
       streamerId: form.elements.streamerId.value,
       tags: form.elements.tags.value.split(",").map((tag) => tag.trim()).filter(Boolean),
@@ -431,7 +421,7 @@ form.addEventListener("submit", async (event) => {
     }
     if (editing) {
       await api(`/api/${editing.seed ? "seed" : "videos"}/${editing.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: video.title, text: video.text, collection: video.collection, category: video.category, streamerId: video.streamerId, tags: video.tags, posterUrl: video.posterUrl, offers }),
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: video.title, text: video.text, category: video.category, streamerId: video.streamerId, tags: video.tags, posterUrl: video.posterUrl, offers }),
       });
     } else if (source === "kinescope") {
       video.id = kinescopeId(form.elements.kinescopeUrl.value);
@@ -472,7 +462,7 @@ dialog.addEventListener("close", () => {
   syncModalScroll();
 });
 search.addEventListener("input", render);
-for (const control of [statusFilter, sourceFilter, collectionFilter, categoryFilter, streamerFilter, productFilter, sortBy]) control.addEventListener("change", render);
+for (const control of [statusFilter, sourceFilter, categoryFilter, streamerFilter, productFilter, sortBy]) control.addEventListener("change", render);
 tagFilter.addEventListener("input", render);
 clearFiltersButton.addEventListener("click", clearFilters);
 document.getElementById("empty-clear").addEventListener("click", clearFilters);

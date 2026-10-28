@@ -579,14 +579,12 @@ async function loadFeed() {
     }
   } catch (error) { /* GitHub Pages показывает исходную ленту. */ }
   const params = new URLSearchParams(location.search);
-  const collection = params.get("collection");
-  if (collection) FEED = FEED.filter((item) => item.collection?.toLocaleLowerCase("ru") === collection.toLocaleLowerCase("ru"));
   const requestedIndex = FEED.findIndex((item) => item.id === params.get("video"));
   active = requestedIndex >= 0 ? requestedIndex : 0;
   if (!feedEnabled || !FEED.length) {
     feed.hidden = true;
     status.hidden = false;
-    status.textContent = feedEnabled ? "В этой коллекции пока нет видео." : "Тревел лента сейчас выключена.";
+    status.textContent = feedEnabled ? "В ленте пока нет видео." : "Тревел лента сейчас выключена.";
     return;
   }
   render();

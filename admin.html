@@ -47,12 +47,11 @@
             <div class="filter-grid">
               <label class="filter-field">Публикация<select id="filter-status"><option value="all">Все видео</option><option value="active">В ленте</option><option value="inactive">Скрытые</option></select></label>
               <label class="filter-field">Источник<select id="filter-source"><option value="all">Любой источник</option><option value="kinescope">Кинескоп</option><option value="upload">Загруженные</option></select></label>
-              <label class="filter-field">Коллекция<select id="filter-collection"><option value="all">Все коллекции</option></select></label>
               <label class="filter-field">Категория<select id="filter-category"><option value="all">Все категории</option><option value="hotels">Отели</option><option value="transport">Транспорт</option><option value="cars">Автомобили</option><option value="tours">Туры</option><option value="other">Другое</option></select></label>
               <label class="filter-field">Автор<select id="filter-streamer"><option value="all">Все авторы</option></select></label>
               <label class="filter-field">Товар<select id="filter-product"><option value="all">Все товары</option></select></label>
               <label class="filter-field">Тег<input id="filter-tag" type="search" placeholder="Например, Москва"></label>
-              <label class="filter-field">Сортировка<select id="sort-by" aria-label="Сортировка"><option value="order">Порядок в ленте</option><option value="order-reverse">Обратный порядок</option><option value="title-asc">Название: А → Я</option><option value="title-desc">Название: Я → А</option><option value="collection-asc">Коллекция: А → Я</option><option value="collection-desc">Коллекция: Я → А</option></select></label>
+              <label class="filter-field">Сортировка<select id="sort-by" aria-label="Сортировка"><option value="order">Порядок в ленте</option><option value="order-reverse">Обратный порядок</option><option value="title-asc">Название: А → Я</option><option value="title-desc">Название: Я → А</option></select></label>
             </div>
           </div>
         </div>
@@ -73,7 +72,6 @@
       <div id="upload-field" class="field" hidden><label for="video-file">Видеофайл <b>*</b></label><input id="video-file" name="videoFile" type="file" accept="video/mp4,video/webm,.mp4,.webm"><small>MP4 или WebM, до 150 МБ. Файл хранится только на этом компьютере.</small></div>
       <div class="field"><label for="video-title">Название <b>*</b></label><input id="video-title" name="title" maxlength="120" required placeholder="Например, Выходные в Казани"></div>
       <div class="field"><label for="video-text">Описание</label><textarea id="video-text" name="text" maxlength="1000" rows="3" placeholder="Короткая подпись под роликом"></textarea></div>
-      <div class="field"><label for="video-collection">Коллекция</label><input id="video-collection" name="collection" maxlength="80" placeholder="Например, Москва"><small>Можно открыть только эту коллекцию через параметр <code>?collection=Москва</code>.</small></div>
       <div class="form-two-columns"><div class="field"><label for="video-category">Категория</label><select id="video-category" name="category"><option value="">Без категории</option><option value="hotels">Отели</option><option value="transport">Транспорт</option><option value="cars">Автомобили</option><option value="tours">Туры</option><option value="other">Другое</option></select></div><div class="field"><label for="video-streamer">Автор</label><select id="video-streamer" name="streamerId"><option value="">Не выбран</option></select></div></div>
       <div class="field"><label for="video-tags">Теги</label><input id="video-tags" name="tags" placeholder="Путешествия, Москва"><small>До 10 тегов через запятую.</small></div>
       <div class="field"><label for="video-poster">Постер</label><input id="video-poster" name="posterFile" type="file" accept="image/png,image/jpeg,image/webp"><small>По умолчанию используется обложка Кинескопа. Для локального файла можно загрузить свою.</small></div>
@@ -85,7 +83,7 @@
   <dialog id="preview-dialog" class="preview-dialog" aria-labelledby="preview-title"><h2 id="preview-title" class="sr-only">Видео</h2><div id="preview-body" class="preview-body"></div><button id="preview-close" class="preview-close" type="button" aria-label="Закрыть предпросмотр"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="feed-data.js?v=1"></script>
-  <script src="admin.js?v=19"></script>
+  <script src="admin.js?v=20"></script>
   <script src="admin-sections.js?v=12"></script>
 </body>
 </html>
