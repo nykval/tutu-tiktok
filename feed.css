@@ -25,12 +25,21 @@ button, a { font-family: inherit; }
 }
 
 .frame {
+  --feed-safe-bottom: env(safe-area-inset-bottom);
+  --feed-letterbox-inset: 0px;
   position: relative;
   width: min(100vw, calc(100dvh * 9 / 16));
   height: min(100dvh, calc(100vw * 16 / 9));
   overflow: hidden;
   background: #000;
   container-type: size;
+}
+
+@media (max-aspect-ratio: 9/16) {
+  .frame {
+    --feed-safe-bottom: 0px;
+    --feed-letterbox-inset: env(safe-area-inset-bottom);
+  }
 }
 
 .player-slot {
@@ -153,16 +162,16 @@ button, a { font-family: inherit; }
   position: absolute;
   z-index: 3;
   right: 4px;
-  bottom: 230px;
+  bottom: calc(230px - var(--feed-letterbox-inset));
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
 }
 
-.slide:has(.offer + .offer) .rail { bottom: 294px; }
+.slide:has(.offer + .offer) .rail { bottom: calc(294px - var(--feed-letterbox-inset)); }
 
-.heart-icon, .share-icon { position: relative; display: block; width: 21px; height: 21px; }
+.heart-icon, .share-icon { position: relative; display: block; width: 27.3px; height: 27.3px; }
 .heart-icon::before, .heart-icon::after, .share-icon::before { content: ""; position: absolute; inset: 0; background: currentColor; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
 .heart-icon::before { -webkit-mask-image: url("assets/brand/feed-like-shape.svg"); mask-image: url("assets/brand/feed-like-shape.svg"); }
 .heart-icon::after { background: #FD5623; -webkit-mask-image: url("assets/brand/feed-like-shape-fill.svg"); mask-image: url("assets/brand/feed-like-shape-fill.svg"); clip-path: inset(100% 0 0); transition: clip-path 280ms cubic-bezier(.2,.8,.2,1); }
@@ -177,7 +186,7 @@ button, a { font-family: inherit; }
   z-index: 3;
   left: 12px;
   right: 12px;
-  bottom: calc(28px + env(safe-area-inset-bottom));
+  bottom: calc(28px + var(--feed-safe-bottom));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -311,21 +320,20 @@ button, a { font-family: inherit; }
   z-index: 4;
   left: 14px;
   right: 14px;
-  bottom: calc(8px + env(safe-area-inset-bottom));
-  height: 28px;
+  bottom: calc(12px + var(--feed-safe-bottom));
+  height: 4px;
   pointer-events: none;
 }
 
 .scrub-bar {
   position: absolute;
-  top: 50%;
+  top: 0;
   left: 0;
   right: 0;
   height: 4px;
   background: rgba(255, 255, 255, 0.38);
   border-radius: 999px;
   overflow: visible;
-  transform: translateY(-50%);
 }
 
 .scrub-fill {

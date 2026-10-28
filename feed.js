@@ -195,10 +195,11 @@ function playbackState(kind) {
 
 let factory = null;
 let cachedPrevious = null;
-let preloadedNext = null;
+const preloadedNeighbors = new Map();
 let preloadTimer = 0;
 let playerIndex = -1;
 let hostSerial = 0;
+let scrollDirection = 1;
 
 function playerOptions(id, autoPlay = false) {
   return {
@@ -255,18 +256,17 @@ function discardPreload(entry) {
   if (entry.player) entry.player.destroy().catch(() => {}).finally(() => entry.host.remove());
 }
 
-function prewarmNext() {
-  const index = active + 1;
-  if (index >= FEED.length || cachedPrevious?.index === index) return;
+function prewarmNeighbor(offset) {
+  const index = active + offset;
+  if (index < 0 || index >= FEED.length || cachedPrevious?.index === index) return;
   if (FEED[index].source !== "upload" && !factory) return;
-  if (preloadedNext?.index === index) return;
-  if (preloadedNext) discardPreload(preloadedNext);
+  if (preloadedNeighbors.has(index)) return;
   const hostId = "play-" + (++hostSerial);
   const host = document.createElement("div");
   host.id = hostId;
   slides()[index].querySelector(".player-slot").appendChild(host);
   const entry = { index, host, player: null, cancelled: false, promise: null };
-  preloadedNext = entry;
+  preloadedNeighbors.set(index, entry);
   const initialSoundWanted = soundWanted;
   entry.promise = (async () => {
     try {
@@ -288,17 +288,36 @@ function prewarmNext() {
       return instance;
     } catch (error) {
       host.remove();
-      if (preloadedNext === entry) preloadedNext = null;
+      if (preloadedNeighbors.get(index) === entry) preloadedNeighbors.delete(index);
       return null;
     }
   })();
 }
 
+function prewarmNeighbors() {
+  const offsets = scrollDirection < 0 ? [-1, 1, 2] : [1, 2, -1];
+  offsets.forEach(prewarmNeighbor);
+}
+
+function prunePreloads(index) {
+  for (const [preparedIndex, entry] of preloadedNeighbors) {
+    if (preparedIndex !== index && preparedIndex >= index - 1 && preparedIndex <= index + 2 &&
+        preparedIndex !== cachedPrevious?.index) continue;
+    preloadedNeighbors.delete(preparedIndex);
+    discardPreload(entry);
+  }
+}
+
 function schedulePreload(token, delay = 180) {
   clearTimeout(preloadTimer);
   preloadTimer = setTimeout(() => {
-    if (token === generation && player && !userPaused && !document.hidden) prewarmNext();
+    if (token === generation && player && !userPaused && !document.hidden) prewarmNeighbors();
   }, delay);
+}
+
+function hasPreparedNeighbor(index) {
+  return index < 0 || index >= FEED.length || cachedPrevious?.index === index ||
+    preloadedNeighbors.has(index);
 }
 
 const boundPlayerTokens = new WeakMap();
@@ -378,7 +397,8 @@ function markPlaying(instance, token) {
   status.hidden = true;
   retry.hidden = true;
   revealActive();
-  if (preloadedNext?.index !== active + 1) schedulePreload(token, 0);
+  if (!hasPreparedNeighbor(active + 1) || !hasPreparedNeighbor(active + 2) ||
+      !hasPreparedNeighbor(active - 1)) schedulePreload(token, 0);
   refreshProgress(instance, token);
   if (userPaused || document.hidden) instance.pause().catch(() => {});
   else instance.isMuted().then((value) => {
@@ -438,6 +458,7 @@ function show(index) {
   if (next === active && (player || mountingIndex === next)) {
     return;
   }
+  if (next !== active) scrollDirection = next > active ? 1 : -1;
   const previous = player;
   if (previous) previous.pause().catch(() => {});
   clearTimeout(preloadTimer);
@@ -531,12 +552,10 @@ async function openVideo(index, token) {
   if (token !== generation || (FEED[index].source !== "upload" && !factory)) return;
   const returning = cachedPrevious?.index === index ? cachedPrevious : null;
   if (returning) cachedPrevious = null;
-  const warmed = !returning && preloadedNext?.index === index ? preloadedNext : null;
-  if (warmed) preloadedNext = null;
-  else if (preloadedNext) {
-    discardPreload(preloadedNext);
-    preloadedNext = null;
-  }
+  const prepared = preloadedNeighbors.get(index);
+  if (prepared) preloadedNeighbors.delete(index);
+  const warmed = returning ? null : prepared;
+  if (returning && prepared) discardPreload(prepared);
   if (player) {
     const outgoing = { index: playerIndex, player };
     player = null;
@@ -557,6 +576,7 @@ async function openVideo(index, token) {
     cachedPrevious.player.destroy().catch(() => {});
     cachedPrevious = null;
   }
+  prunePreloads(index);
   let instance = returning?.player || (warmed ? await warmed.promise : null);
   if (token !== generation) {
     if (instance && !returning) await instance.destroy().catch(() => {});
