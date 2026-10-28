@@ -113,16 +113,18 @@ h2 { margin: 6px 0 0; font-size: 23px; font-weight: 600; letter-spacing: -.025em
 .card-switch input:disabled + .switch-track { opacity: .58; }
 .status-label { color: #858391; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .card-switch input:checked ~ .status-label { color: #3f8555; }
-.video-id { display: block; max-width: 100%; margin-top: auto; padding-top: 10px; overflow: hidden; color: #9a98a5; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; margin-top: 12px; }
-.source-tag, .meta-chip { display: inline-flex; align-items: center; max-width: 100%; min-height: 22px; padding: 3px 7px; border-radius: 6px; font-size: 10px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.source-tag { gap: 5px; background: #f2eefb; color: #6652b3; }
-.meta-chip { background: #f5f4f7; color: #706d7d; }
+.meta-chip { display: inline-flex; align-items: center; max-width: 100%; min-height: 22px; padding: 3px 7px; overflow: hidden; border-radius: 6px; background: #f5f4f7; color: #706d7d; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .meta-tags { max-width: 180px; }
-.source-tag .ui-icon { width: 11px; height: 11px; }
 .video-title { width: 100%; margin: 11px 0 6px; color: #272333; font-size: 16px; font-weight: 700; line-height: 1.3; }
 .video-text { display: -webkit-box; width: 100%; margin: 0; overflow: hidden; -webkit-line-clamp: 3; -webkit-box-orient: vertical; color: #6d6a79; font-size: 12px; line-height: 1.45; }
-.card-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid #efedf3; }
+.video-facts { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.45fr) minmax(0,1fr); gap: 0; margin: 14px 0 0; padding: 10px 0; border: 1px solid #eeebf3; border-radius: 8px; background: #faf9fc; }
+.video-fact { min-width: 0; padding: 0 10px; }
+.video-fact + .video-fact { border-left: 1px solid #e8e4ee; }
+.video-fact dt { margin-bottom: 4px; color: #95919f; font-size: 10px; line-height: 1.3; }
+.video-fact dd { margin: 0; overflow: hidden; color: #373243; font-size: 11px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.video-fact dd.is-empty { color: #85818f; font-weight: 500; }
+.card-footer { margin-top: 12px; padding-top: 12px; border-top: 1px solid #efedf3; }
 .offer-note { display: block; min-width: 0; overflow: hidden; color: #777483; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .filters { display: block; }
 .filter-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }

@@ -169,25 +169,31 @@ function renderCard(item) {
   const description = (repeatsTitle ? rawDescription.slice(item.title.length).replace(/^[.。!！?？:：\s–—-]+/, "") : rawDescription).trim();
   if (description) info.append(el("p", "video-text", description));
   const meta = el("div", "card-meta");
-  const sourceTag = el("span", "source-tag");
-  const sourceIcon = el("i", "ui-icon " + (item.source === "upload" ? "icon-upload" : "icon-video-camera"));
-  sourceIcon.setAttribute("aria-hidden", "true");
-  sourceTag.append(sourceIcon, document.createTextNode(item.source === "upload" ? "Загруженный файл" : "Кинескоп"));
-  meta.append(sourceTag);
   if (item.collection) meta.append(el("span", "meta-chip", item.collection));
   const author = (state.streamers || []).find((person) => person.id === item.streamerId);
-  if (author) meta.append(el("span", "meta-chip", author.name));
   if (item.tags?.length) {
     const tags = el("span", "meta-chip meta-tags", item.tags.join(", "));
     tags.title = `Теги: ${item.tags.join(", ")}`;
     meta.append(tags);
   }
-  info.append(meta);
-  const id = el("span", "video-id", `ID ${item.id}`);
-  id.title = `ID: ${item.id}`;
-  info.append(id);
+  if (meta.childElementCount) info.append(meta);
   top.append(posterBox, info);
   card.append(top);
+
+  const facts = el("dl", "video-facts");
+  const factValues = [
+    ["Источник", item.source === "upload" ? "Загруженный файл" : "Кинескоп"],
+    ["ID", item.id],
+    ["Автор", author?.name || (item.streamerId ? "Автор не найден" : "Не назначен")],
+  ];
+  for (const [name, value] of factValues) {
+    const fact = el("div", "video-fact");
+    const detail = el("dd", name === "Автор" && !author ? "is-empty" : "", value);
+    detail.title = value;
+    fact.append(el("dt", "", name), detail);
+    facts.append(fact);
+  }
+  card.append(facts);
 
   const footer = el("div", "card-footer");
   const offerNote = el("span", "offer-note", item.offers?.length ? `${item.offers.length === 1 ? "Оффер" : "Офферы"} · ${item.offers.map((offer) => offer.title).join(", ")}` : "Без офферов");
