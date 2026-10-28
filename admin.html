@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="admin.css?v=30">
+  <link rel="stylesheet" href="admin.css?v=31">
 </head>
 <body>
   <div class="app-shell">
@@ -73,7 +73,7 @@
       <div class="field"><label for="video-title">Название <b>*</b></label><input id="video-title" name="title" maxlength="120" required placeholder="Например, Выходные в Казани"></div>
       <div class="field"><label for="video-text">Описание</label><textarea id="video-text" name="text" maxlength="1000" rows="3" placeholder="Короткая подпись под роликом"></textarea></div>
       <div class="form-two-columns"><div class="field"><label for="video-category">Категория</label><select id="video-category" name="category"><option value="">Без категории</option><option value="hotels">Отели</option><option value="transport">Транспорт</option><option value="cars">Автомобили</option><option value="tours">Туры</option><option value="other">Другое</option></select></div><div class="field"><label for="video-streamer">Автор</label><select id="video-streamer" name="streamerId"><option value="">Не выбран</option></select></div></div>
-      <div class="field"><label for="video-tags">Теги</label><input id="video-tags" name="tags" placeholder="Путешествия, Москва"><small>До 10 тегов через запятую.</small></div>
+      <div class="field"><label for="video-tags">Теги</label><div class="tag-editor" id="tag-editor"><div class="tag-chips" id="video-tag-chips" aria-live="polite"></div><input id="video-tags" type="text" placeholder="Введите тег" autocomplete="off" aria-describedby="video-tags-help"></div><small id="video-tags-help">Enter или запятая — добавить тег. До 10 тегов, каждый не длиннее 40 символов.</small></div>
       <div class="field"><label for="video-poster">Постер</label><input id="video-poster" name="posterFile" type="file" accept="image/png,image/jpeg,image/webp"><small>По умолчанию используется обложка Кинескопа. Для локального файла можно загрузить свою.</small></div>
       <div class="offer-fields"><div class="offer-heading"><strong>Офферы</strong><span>Необязательно · до двух карточек</span></div><div class="field"><label for="offer-product">Товар из каталога</label><select id="offer-product" name="offerProduct"><option value="">Без привязки</option></select></div><div class="offer-row"><div class="field"><label for="offer-title">Название</label><input id="offer-title" name="offerTitle" maxlength="100" placeholder="Отель или билет"></div><div class="field"><label for="offer-price">Цена</label><input id="offer-price" name="offerPrice" maxlength="80" placeholder="от 4 500 ₽"></div></div><div class="field"><label for="offer-url">Ссылка на Туту</label><input id="offer-url" name="offerUrl" type="url" placeholder="https://hotel.tutu.ru/…"></div><details class="second-offer" id="second-offer"><summary>Добавить второй оффер</summary><div class="field"><label for="offer-product-2">Товар из каталога</label><select id="offer-product-2" name="offerProduct2"><option value="">Без привязки</option></select></div><div class="offer-row"><div class="field"><label for="offer-title-2">Название</label><input id="offer-title-2" name="offerTitle2" maxlength="100"></div><div class="field"><label for="offer-price-2">Цена</label><input id="offer-price-2" name="offerPrice2" maxlength="80"></div></div><div class="field"><label for="offer-url-2">Ссылка на Туту</label><input id="offer-url-2" name="offerUrl2" type="url" placeholder="https://…"></div></details></div>
       <p id="form-error" class="form-error" role="alert" hidden></p>
@@ -83,7 +83,7 @@
   <dialog id="preview-dialog" class="preview-dialog" aria-labelledby="preview-title"><h2 id="preview-title" class="sr-only">Видео</h2><div id="preview-body" class="preview-body"></div><button id="preview-close" class="preview-close" type="button" aria-label="Закрыть предпросмотр"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="feed-data.js?v=1"></script>
-  <script src="admin.js?v=20"></script>
+  <script src="admin.js?v=21"></script>
   <script src="admin-sections.js?v=12"></script>
 </body>
 </html>

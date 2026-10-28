@@ -9,6 +9,9 @@ const categoryFilter = document.getElementById("filter-category");
 const streamerFilter = document.getElementById("filter-streamer");
 const productFilter = document.getElementById("filter-product");
 const tagFilter = document.getElementById("filter-tag");
+const tagInput = document.getElementById("video-tags");
+const tagChipList = document.getElementById("video-tag-chips");
+const tagEditor = document.getElementById("tag-editor");
 const sortBy = document.getElementById("sort-by");
 const clearFiltersButton = document.getElementById("clear-filters");
 const activeFiltersCount = document.getElementById("filter-active-count");
@@ -17,6 +20,7 @@ let state = { enabled: true, hiddenIds: [], overrides: {}, videos: [] };
 let apiAvailable = false;
 let toastTimer;
 let modalScrollY = null;
+let videoTags = [];
 
 function syncModalScroll() {
   if (document.querySelector("dialog[open]")) {
@@ -66,6 +70,43 @@ function icon(name) {
   const node = el("i", `ui-icon icon-${name}`);
   node.setAttribute("aria-hidden", "true");
   return node;
+}
+
+function renderTagChips() {
+  tagChipList.replaceChildren(...videoTags.map((tag, index) => {
+    const chip = el("span", "tag-chip");
+    const remove = el("button", "tag-chip-remove");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Удалить тег «${tag}»`);
+    remove.append(icon("cross"));
+    remove.addEventListener("pointerdown", (event) => event.preventDefault());
+    remove.addEventListener("click", () => {
+      videoTags.splice(index, 1);
+      renderTagChips();
+      tagInput.focus();
+    });
+    chip.append(el("span", "tag-chip-label", tag), remove);
+    return chip;
+  }));
+  tagInput.placeholder = videoTags.length ? "Ещё тег…" : "Введите тег";
+}
+
+function addVideoTags(raw) {
+  const incoming = raw.split(/[,\n]+/).map((tag) => tag.trim()).filter(Boolean);
+  const next = [...videoTags];
+  for (const tag of incoming) {
+    if (tag.length > 40) throw new Error("Тег не может быть длиннее 40 символов");
+    if (next.some((existing) => existing.toLocaleLowerCase("ru") === tag.toLocaleLowerCase("ru"))) continue;
+    if (next.length >= 10) throw new Error("Можно добавить до 10 тегов");
+    next.push(tag);
+  }
+  videoTags = next;
+  tagInput.value = "";
+  renderTagChips();
+}
+
+function commitTagInput() {
+  if (tagInput.value.trim()) addVideoTags(tagInput.value);
 }
 
 function openPreview(item) {
@@ -183,9 +224,7 @@ function renderCard(item) {
   const meta = el("div", "card-meta");
   const author = (state.streamers || []).find((person) => person.id === item.streamerId);
   if (item.tags?.length) {
-    const tags = el("span", "meta-chip meta-tags", item.tags.join(", "));
-    tags.title = `Теги: ${item.tags.join(", ")}`;
-    meta.append(tags);
+    for (const tag of item.tags) meta.append(el("span", "meta-chip meta-tags", tag));
   }
   if (meta.childElementCount) info.append(meta);
   top.append(posterBox, info);
@@ -349,6 +388,8 @@ function fillOfferFromProduct(suffix) {
 function openForm(item = null) {
   editing = item;
   form.reset();
+  videoTags = [...(item?.tags || [])];
+  renderTagChips();
   fillVideoReferences();
   document.getElementById("form-error").hidden = true;
   document.getElementById("source-tabs").hidden = !!item;
@@ -367,7 +408,6 @@ function openForm(item = null) {
     form.elements.text.value = item.text || "";
     form.elements.category.value = item.category || "";
     form.elements.streamerId.value = item.streamerId || "";
-    form.elements.tags.value = (item.tags || []).join(", ");
     for (let i = 0; i < Math.min(item.offers?.length || 0, 2); i++) {
       const suffix = i ? "2" : "";
       form.elements[`offerProduct${suffix}`].value = item.offers[i].productId || "";
@@ -390,6 +430,33 @@ form.addEventListener("change", (event) => {
   if (event.target.name === "offerProduct") fillOfferFromProduct("");
   if (event.target.name === "offerProduct2") fillOfferFromProduct("2");
 });
+tagInput.addEventListener("keydown", (event) => {
+  if (event.isComposing) return;
+  if (event.key === "Enter" || event.key === ",") {
+    event.preventDefault();
+    try { commitTagInput(); } catch (error) { toast(error.message); }
+  } else if (event.key === "Backspace" && !tagInput.value && videoTags.length) {
+    videoTags.pop();
+    renderTagChips();
+  }
+});
+tagInput.addEventListener("input", (event) => {
+  if (event.isComposing || !tagInput.value.includes(",")) return;
+  try { addVideoTags(tagInput.value); } catch (error) { toast(error.message); }
+});
+tagInput.addEventListener("paste", (event) => {
+  const pasted = event.clipboardData?.getData("text") || "";
+  if (!/[,\n]/.test(pasted)) return;
+  event.preventDefault();
+  try { addVideoTags(`${tagInput.value}${pasted}`); } catch (error) { toast(error.message); }
+});
+tagEditor.addEventListener("click", (event) => {
+  if (event.target === tagEditor || event.target === tagChipList) tagInput.focus();
+});
+tagInput.addEventListener("blur", (event) => {
+  if (event.relatedTarget && tagEditor.contains(event.relatedTarget)) return;
+  try { commitTagInput(); } catch (error) { toast(error.message); }
+});
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const errorNode = document.getElementById("form-error");
@@ -398,6 +465,7 @@ form.addEventListener("submit", async (event) => {
   save.disabled = true;
   save.querySelector(".button-label").textContent = "Сохранение…";
   try {
+    commitTagInput();
     const source = form.elements.source.value;
     const offers = formOffers().map((offer) => ({ ...(editing?.offers?.find((existing) => existing.href === offer.href) || {}), ...offer }));
     const video = {
@@ -406,7 +474,7 @@ form.addEventListener("submit", async (event) => {
       text: form.elements.text.value.trim(),
       category: form.elements.category.value,
       streamerId: form.elements.streamerId.value,
-      tags: form.elements.tags.value.split(",").map((tag) => tag.trim()).filter(Boolean),
+      tags: [...videoTags],
       posterUrl: editing?.posterUrl || "",
       offers,
     };
@@ -457,6 +525,8 @@ document.getElementById("dialog-close").addEventListener("click", () => dialog.c
 document.getElementById("dialog-cancel").addEventListener("click", () => dialog.close());
 dialog.addEventListener("close", () => {
   form.reset();
+  videoTags = [];
+  renderTagChips();
   editing = null;
   document.getElementById("form-error").hidden = true;
   syncModalScroll();
