@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="admin.css?v=35">
+  <link rel="stylesheet" href="admin.css?v=41">
 </head>
 <body>
   <div class="app-shell">
@@ -82,8 +82,8 @@
       <section class="entity-form-group video-form-group"><h3>Обложка</h3><p>Своё изображение для карточки видео.</p>
       <div class="field poster-field"><span class="poster-field-label">Постер</span><div class="poster-picker"><div class="poster-preview"><img id="poster-preview-image" alt="Предпросмотр постера" hidden><span id="poster-preview-empty" class="poster-preview-empty"><i class="ui-icon icon-picture" aria-hidden="true"></i><span>Нет постера</span></span></div><div class="poster-picker-content"><strong id="poster-status">Постер не выбран</strong><p id="poster-hint">Можно добавить свою обложку для видео.</p><div class="poster-actions"><button id="poster-choose" class="outline-button poster-choose" type="button"><i class="ui-icon icon-upload" aria-hidden="true"></i><span id="poster-choose-label">Выбрать постер</span></button><button id="poster-remove" class="poster-remove" type="button" hidden><i class="ui-icon icon-trash" aria-hidden="true"></i><span>Убрать постер</span></button></div><small>PNG, JPEG или WebP · до 10 МБ</small></div></div><input id="video-poster" name="posterFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div>
       </section>
-      <section class="entity-form-group video-form-group"><h3>Офферы</h3><p>Необязательно · до двух карточек.</p>
-      <div class="offer-fields"><div class="field"><label for="offer-product">Товар из каталога</label><select id="offer-product" name="offerProduct"><option value="">Без привязки</option></select></div><div class="offer-row"><div class="field"><label for="offer-title">Название</label><input id="offer-title" name="offerTitle" maxlength="100" placeholder="Отель или билет"></div><div class="field"><label for="offer-price">Цена</label><input id="offer-price" name="offerPrice" maxlength="80" placeholder="от 4 500 ₽"></div></div><div class="field"><label for="offer-url">Ссылка на Туту</label><input id="offer-url" name="offerUrl" type="url" placeholder="https://hotel.tutu.ru/…"></div><details class="second-offer" id="second-offer"><summary>Добавить второй оффер</summary><div class="field"><label for="offer-product-2">Товар из каталога</label><select id="offer-product-2" name="offerProduct2"><option value="">Без привязки</option></select></div><div class="offer-row"><div class="field"><label for="offer-title-2">Название</label><input id="offer-title-2" name="offerTitle2" maxlength="100"></div><div class="field"><label for="offer-price-2">Цена</label><input id="offer-price-2" name="offerPrice2" maxlength="80"></div></div><div class="field"><label for="offer-url-2">Ссылка на Туту</label><input id="offer-url-2" name="offerUrl2" type="url" placeholder="https://…"></div></details></div>
+      <section class="entity-form-group video-form-group"><h3>Оффер</h3><p>Необязательно · одна карточка.</p>
+      <div class="offer-fields"><div class="field"><label for="offer-product">Товар из каталога</label><select id="offer-product" name="offerProduct"><option value="">Без привязки</option></select></div><div class="offer-row"><div class="field"><label for="offer-title">Название</label><input id="offer-title" name="offerTitle" maxlength="100" placeholder="Отель или билет"></div><div class="field"><label for="offer-price">Цена</label><input id="offer-price" name="offerPrice" maxlength="80" placeholder="от 4 500 ₽"></div></div><div class="field"><label for="offer-url">Ссылка на Туту</label><input id="offer-url" name="offerUrl" type="url" placeholder="https://hotel.tutu.ru/…"></div></div>
       </section>
       <p id="form-error" class="form-error" role="alert" hidden></p>
       </div>
@@ -92,8 +92,8 @@
   </dialog>
   <dialog id="preview-dialog" class="preview-dialog" aria-labelledby="preview-title"><h2 id="preview-title" class="sr-only">Видео</h2><div id="preview-body" class="preview-body"></div><button id="preview-close" class="preview-close" type="button" aria-label="Закрыть предпросмотр"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
-  <script src="feed-data.js?v=3"></script>
-  <script src="admin.js?v=24"></script>
+  <script src="feed-data.js?v=4"></script>
+  <script src="admin.js?v=29"></script>
   <script src="admin-sections.js?v=15"></script>
 </body>
 </html>

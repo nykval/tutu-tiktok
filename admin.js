@@ -25,6 +25,26 @@ let modalScrollY = null;
 let videoTags = [];
 let posterRemoved = false;
 let posterObjectUrl = null;
+const LIKE_COUNTS_KEY = "tututiktok-like-counts-v1";
+let reportStats = { byVideo: {} };
+
+function loadLikeCounts() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LIKE_COUNTS_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch (error) { return {}; }
+}
+
+const likeCounts = loadLikeCounts();
+
+function likeCountFor(videoId) {
+  const stored = Number(likeCounts[videoId]);
+  if (Number.isInteger(stored) && stored >= 11) return stored;
+  const initial = 11 + Math.floor(Math.random() * 40);
+  likeCounts[videoId] = initial;
+  try { localStorage.setItem(LIKE_COUNTS_KEY, JSON.stringify(likeCounts)); } catch (error) { /* storage may be unavailable */ }
+  return initial;
+}
 
 function syncModalScroll() {
   if (document.querySelector("dialog[open]")) {
@@ -241,17 +261,52 @@ function renderCard(item) {
     ["Автор", author?.name || (item.streamerId ? "Автор не найден" : "Не назначен")],
   ];
   for (const [name, value] of factValues) {
-    const fact = el("div", "video-fact");
+    const key = name === "Источник" ? "source" : name === "ID" ? "id" : "author";
+    const fact = el("div", `video-fact video-fact-${key}`);
     const detail = el("dd", name === "Автор" && !author ? "is-empty" : "", value);
     detail.title = value;
-    fact.append(el("dt", "", name), detail);
+    const factIcon = key === "source" ? "video-camera" : key === "id" ? "copy" : "user";
+    const label = el("dt", "");
+    label.append(icon(factIcon), document.createTextNode(name));
+    fact.append(label, detail);
     facts.append(fact);
   }
   card.append(facts);
 
+  const metrics = el("div", "video-metrics");
+  const likeMetric = el("span", "video-metric");
+  likeMetric.append(el("i", "like-metric-icon"), el("strong", "", String(likeCountFor(item.id))));
+  likeMetric.setAttribute("aria-label", `Лайки: ${likeCountFor(item.id)}`);
+  const viewCount = reportStats.byVideo?.[item.id]?.view || 0;
+  const viewMetric = el("span", "video-metric");
+  viewMetric.append(icon("eye"), el("strong", "", String(viewCount)));
+  viewMetric.setAttribute("aria-label", `Просмотры: ${viewCount}`);
+  metrics.append(likeMetric, viewMetric);
+  card.append(metrics);
+
+  const offers = el("div", "admin-offers");
+  for (const offer of item.offers || []) {
+    const offerCard = el(offer.href ? "a" : "div", "admin-offer");
+    if (offer.href) {
+      offerCard.href = offer.href;
+      offerCard.target = "_blank";
+      offerCard.rel = "noopener noreferrer";
+    }
+    offerCard.setAttribute("aria-label", offer.label || offer.title || "Оффер");
+    const thumb = el("img", "admin-offer-thumb");
+    thumb.src = offer.image || item.posterUrl || `https://kinescope.io/${item.id}/poster.jpg`;
+    thumb.alt = "";
+    thumb.loading = "lazy";
+    const offerText = el("span", "admin-offer-text");
+    offerText.append(el("strong", "admin-offer-title", offer.title || "Оффер"));
+    if (offer.price) offerText.append(el("span", "admin-offer-price", offer.price));
+    offerCard.append(thumb, offerText, el("span", "admin-offer-arrow", "›"));
+    offers.append(offerCard);
+  }
+  if (offers.childElementCount) card.append(offers);
+
   const footer = el("div", "card-footer");
-  const offerNote = el("span", "offer-note", item.offers?.length ? `${item.offers.length === 1 ? "Оффер" : "Офферы"} · ${item.offers.map((offer) => offer.title).join(", ")}` : "Без офферов");
-  offerNote.title = offerNote.textContent;
+  const offerNote = el("span", "offer-note", item.offers?.length ? `${item.offers.length} ${item.offers.length === 1 ? "оффер" : "оффера"}` : "Без офферов");
   footer.append(offerNote);
   if (!item.seed && apiAvailable) {
     const remove = el("button", "");
@@ -271,7 +326,7 @@ function renderCard(item) {
     remove.className = "menu-action danger";
     popup.append(remove);
   }
-  card.append(footer);
+  if (!offers.childElementCount) card.append(footer);
   return card;
 }
 
@@ -387,27 +442,23 @@ function renderPosterPreview() {
 
 function formOffers() {
   const offers = [];
-  for (const suffix of ["", "2"]) {
-    const productId = form.elements[`offerProduct${suffix}`].value;
-    const title = form.elements[`offerTitle${suffix}`].value.trim();
-    const price = form.elements[`offerPrice${suffix}`].value.trim();
-    const href = form.elements[`offerUrl${suffix}`].value.trim();
-    if (!title && !price && !href) continue;
-    if (!title || !href) throw new Error("Для каждого оффера укажите название и ссылку");
-    let url;
-    try { url = new URL(href); } catch (error) { throw new Error("Проверьте ссылку оффера"); }
-    if (url.protocol !== "https:") throw new Error("Ссылка оффера должна начинаться с https://");
-    offers.push({ title, price, href, ...(productId ? { productId } : {}) });
-  }
+  const productId = form.elements.offerProduct.value;
+  const title = form.elements.offerTitle.value.trim();
+  const price = form.elements.offerPrice.value.trim();
+  const href = form.elements.offerUrl.value.trim();
+  if (!title && !price && !href) return offers;
+  if (!title || !href) throw new Error("Для оффера укажите название и ссылку");
+  let url;
+  try { url = new URL(href); } catch (error) { throw new Error("Проверьте ссылку оффера"); }
+  if (url.protocol !== "https:") throw new Error("Ссылка оффера должна начинаться с https://");
+  offers.push({ title, price, href, ...(productId ? { productId } : {}) });
   return offers;
 }
 
 function fillVideoReferences() {
   const streamer = form.elements.streamerId;
   streamer.replaceChildren(new Option("Не выбран", ""), ...(state.streamers || []).map((item) => new Option(item.name, item.id)));
-  for (const suffix of ["", "2"]) {
-    form.elements[`offerProduct${suffix}`].replaceChildren(new Option("Без привязки", ""), ...(state.products || []).filter((item) => item.active).map((item) => new Option(`${item.sku} · ${item.title}`, item.id)));
-  }
+  form.elements.offerProduct.replaceChildren(new Option("Без привязки", ""), ...(state.products || []).filter((item) => item.active).map((item) => new Option(`${item.sku} · ${item.title}`, item.id)));
 }
 
 function fillOfferFromProduct(suffix) {
@@ -445,16 +496,13 @@ function openForm(item = null) {
     form.elements.text.value = item.text || "";
     form.elements.category.value = item.category || "";
     form.elements.streamerId.value = item.streamerId || "";
-    for (let i = 0; i < Math.min(item.offers?.length || 0, 2); i++) {
-      const suffix = i ? "2" : "";
-      form.elements[`offerProduct${suffix}`].value = item.offers[i].productId || "";
-      form.elements[`offerTitle${suffix}`].value = item.offers[i].title || "";
-      form.elements[`offerPrice${suffix}`].value = item.offers[i].price || "";
-      form.elements[`offerUrl${suffix}`].value = item.offers[i].href || "";
+    const offer = item.offers?.[0];
+    if (offer) {
+      form.elements.offerProduct.value = offer.productId || "";
+      form.elements.offerTitle.value = offer.title || "";
+      form.elements.offerPrice.value = offer.price || "";
+      form.elements.offerUrl.value = offer.href || "";
     }
-    document.getElementById("second-offer").open = (item.offers?.length || 0) > 1;
-  } else {
-    document.getElementById("second-offer").open = false;
   }
   showSource();
   document.querySelectorAll("#video-dialog select").forEach((select) => select.updateCustomSelect?.());
@@ -466,7 +514,6 @@ function openForm(item = null) {
 form.addEventListener("change", (event) => {
   if (event.target.name === "source") showSource();
   if (event.target.name === "offerProduct") fillOfferFromProduct("");
-  if (event.target.name === "offerProduct2") fillOfferFromProduct("2");
 });
 document.getElementById("poster-choose").addEventListener("click", () => posterInput.click());
 posterInput.addEventListener("change", () => {
@@ -617,6 +664,7 @@ async function init() {
   try {
     state = await api("/api/state");
     apiAvailable = true;
+    try { reportStats = await api("/api/reports"); } catch (error) { reportStats = { byVideo: {} }; }
   } catch (error) {
     document.getElementById("offline-alert").hidden = false;
     document.getElementById("add-button").disabled = true;

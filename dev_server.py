@@ -63,7 +63,7 @@ def enriched_video(video, products, streamers):
         return result
     result["offers"] = []
     by_id = {item["id"]: item for item in products}
-    for offer in video.get("offers", []):
+    for offer in video.get("offers", [])[:1]:
         product = by_id.get(offer.get("productId"))
         if product:
             price = product["salePrice"] if product["salePrice"] is not None else product["price"]
@@ -316,8 +316,8 @@ class Handler(SimpleHTTPRequestHandler):
             result["posterUrl"] = poster
         if "offers" in body or required:
             offers = body.get("offers", [])
-            if not isinstance(offers, list) or len(offers) > 2:
-                raise ValueError("Можно добавить не больше двух офферов")
+            if not isinstance(offers, list) or len(offers) > 1:
+                raise ValueError("Можно добавить не больше одного оффера")
             valid = []
             for offer in offers:
                 if not isinstance(offer, dict):

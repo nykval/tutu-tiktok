@@ -114,6 +114,63 @@ function isHotelOffer(offer) {
   catch (error) { return false; }
 }
 
+const TRANSPORT_ART_PATHS = {
+  airplane: "transport-airplane.png",
+  bus: "transport-bus.png",
+  car: "transport-car.png",
+  train: "transport-train.png",
+};
+
+const TRANSPORT_ICON_ALIASES = {
+  airplane: "airplane", plane: "airplane", flight: "airplane", avia: "airplane", air: "airplane",
+  самолет: "airplane", самолёт: "airplane", авиа: "airplane", авиабилет: "airplane", рейс: "airplane",
+  bus: "bus", автобус: "bus", coach: "bus",
+  car: "car", auto: "car", автомобиль: "car", машина: "car", такси: "car", taxi: "car", авто: "car",
+  train: "train", rail: "train", railway: "train", поезд: "train", "ж/д": "train", ржд: "train",
+};
+
+function normalizedTransportKind(value) {
+  const key = String(value || "").trim().toLocaleLowerCase("ru").replace(/[ё]/g, "е");
+  if (!key) return "";
+  if (TRANSPORT_ICON_ALIASES[key]) return TRANSPORT_ICON_ALIASES[key];
+  return Object.entries(TRANSPORT_ICON_ALIASES).find(([alias]) => key.includes(alias))?.[1] || "";
+}
+
+function transportKindFor(offer) {
+  const explicit = offer.transportType || offer.transportMode || offer.vehicleType || offer.transportIcon || offer.icon;
+  const explicitKind = normalizedTransportKind(explicit);
+  if (explicitKind) return explicitKind;
+
+  const text = [offer.title, offer.label, offer.description, offer.sku, offer.href].filter(Boolean).join(" ").toLocaleLowerCase("ru");
+  if (/(самол|авиа|рейс|flight|avia|airline|airport)/i.test(text)) return "airplane";
+  if (/(поезд|ж\/?д|ржд|train|railway|rail\b)/i.test(text)) return "train";
+  if (/(автобус|bus|coach)/i.test(text)) return "bus";
+  if (/(автомобил|машин|такси|авто|car|auto|taxi)/i.test(text)) return "car";
+  return "airplane";
+}
+
+function isTransportOffer(offer) {
+  if (offer.type === "transport") return true;
+  const explicit = offer.transportType || offer.transportMode || offer.vehicleType || offer.transportIcon;
+  if (normalizedTransportKind(explicit)) return true;
+  try {
+    const hostname = new URL(offer.href).hostname;
+    if (/(avia|train|bus|car|transport|poezd|railway|rzd)\.tutu\.ru$/i.test(hostname)) return true;
+  } catch (error) { /* ручной оффер может быть без корректного URL */ }
+  return !!transportKindFor(offer) && /(самол|авиа|рейс|поезд|ж\/?д|ржд|train|rail|автобус|bus|coach|автомобил|машин|такси|авто|car|auto|taxi)/i.test(
+    [offer.title, offer.label, offer.description, offer.sku].filter(Boolean).join(" "),
+  );
+}
+
+function transportIcon(kind) {
+  const image = document.createElement("img");
+  image.className = "offer-icon";
+  image.src = `assets/transport-art/${TRANSPORT_ART_PATHS[kind] || TRANSPORT_ART_PATHS.airplane}`;
+  image.alt = "";
+  image.setAttribute("aria-hidden", "true");
+  return image;
+}
+
 function iconButton(action, label, svg, count) {
   const button = document.createElement("button");
   button.type = "button";
@@ -207,24 +264,34 @@ function render() {
     author.append(authorLine, captionLine);
     dock.appendChild(author);
 
-    (item.offers || []).forEach((offer) => {
+    const offers = document.createElement("div");
+    const itemOffers = (item.offers || []).slice(0, 1);
+    offers.className = `offers offers--${itemOffers.length}`;
+
+    itemOffers.forEach((offer) => {
       const card = document.createElement("a");
       const hotelOffer = isHotelOffer(offer);
-      card.className = hotelOffer ? "offer offer--hotel" : "offer";
+      const transportOffer = !hotelOffer && isTransportOffer(offer);
+      card.className = ["offer", hotelOffer && "offer--hotel", transportOffer && "offer--transport"].filter(Boolean).join(" ");
       card.href = offer.href;
       card.target = "_blank";
       card.rel = "noopener noreferrer";
       card.setAttribute("aria-label", offer.label || offer.title);
 
-      const thumb = document.createElement("img");
-      thumb.className = "thumb";
-      thumb.alt = "";
-      const thumbUrl = offer.image || posterFor(item);
-      if (index === active) thumb.src = thumbUrl;
-      else thumb.dataset.src = thumbUrl;
-      thumb.loading = index === active ? "eager" : "lazy";
-      thumb.decoding = "async";
-      thumb.fetchPriority = "low";
+      let thumb;
+      if (transportOffer) {
+        thumb = transportIcon(transportKindFor(offer));
+      } else {
+        thumb = document.createElement("img");
+        thumb.className = "thumb";
+        thumb.alt = "";
+        const thumbUrl = offer.image || posterFor(item);
+        if (index === active) thumb.src = thumbUrl;
+        else thumb.dataset.src = thumbUrl;
+        thumb.loading = index === active ? "eager" : "lazy";
+        thumb.decoding = "async";
+        thumb.fetchPriority = "low";
+      }
 
       const text = document.createElement("span");
       text.className = "offer-text";
@@ -241,12 +308,41 @@ function render() {
       chevron.innerHTML = ICONS.chevron;
 
       card.append(thumb, text, chevron);
-      dock.appendChild(card);
+      offers.appendChild(card);
     });
+
+    if (itemOffers.length) dock.appendChild(offers);
 
     slide.appendChild(dock);
     feed.appendChild(slide);
   });
+}
+
+function setLikeState(action, on) {
+  action.classList.toggle("is-on", on);
+  action.setAttribute("aria-pressed", String(on));
+  const slide = action.closest(".slide");
+  const item = FEED[Number(slide?.dataset.index)];
+  if (!item) return;
+  likeCounts[item.id] = Math.max(11, likeCountFor(item.id) + (on ? 1 : -1));
+  action.querySelector(".rail-count").textContent = String(likeCounts[item.id]);
+  action.setAttribute("aria-label", `Нравится: ${likeCounts[item.id]}`);
+  saveLikeCounts();
+  if (on) recordEvent("like", item);
+}
+
+function showDoubleTapLike(slide, event) {
+  const burst = document.createElement("span");
+  burst.className = "double-tap-like";
+  burst.setAttribute("aria-hidden", "true");
+  const bounds = slide.getBoundingClientRect?.();
+  if (bounds && Number.isFinite(event?.clientX) && Number.isFinite(event?.clientY)) {
+    burst.style.left = `${event.clientX - bounds.left}px`;
+    burst.style.top = `${event.clientY - bounds.top}px`;
+  }
+  slide.appendChild(burst);
+  requestAnimationFrame(() => burst.classList.add("is-visible"));
+  setTimeout(() => burst.remove(), 720);
 }
 
 function slides() {
@@ -1002,16 +1098,7 @@ document.addEventListener("click", async (event) => {
     const kind = action.dataset.action;
     if (kind === "like") {
       const on = action.classList.toggle("is-on");
-      action.setAttribute("aria-pressed", String(on));
-      const slide = action.closest(".slide");
-      const item = FEED[Number(slide?.dataset.index)];
-      if (item) {
-        likeCounts[item.id] = Math.max(0, likeCountFor(item.id) + (on ? 1 : -1));
-        action.querySelector(".rail-count").textContent = String(likeCounts[item.id]);
-        action.setAttribute("aria-label", `Нравится: ${likeCounts[item.id]}`);
-        saveLikeCounts();
-      }
-      if (on) recordEvent("like");
+      setLikeState(action, on);
     } else if (kind === "share" && navigator.share) {
       navigator.share({ title: "Тревел лента", url: location.href }).catch(() => {});
     } else if (kind === "more") {
@@ -1041,6 +1128,16 @@ document.addEventListener("click", async (event) => {
     return;
   }
   await togglePlayback();
+});
+
+feed.addEventListener("dblclick", (event) => {
+  if (event.target.closest("[data-action], a, input, button")) return;
+  const slide = event.target.closest(".slide");
+  const action = slide?.querySelector('[data-action="like"]');
+  if (!slide || !action) return;
+  event.preventDefault();
+  if (!action.classList.contains("is-on")) setLikeState(action, true);
+  showDoubleTapLike(slide, event);
 });
 
 function formatTime(seconds) {
