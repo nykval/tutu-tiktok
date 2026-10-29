@@ -83,6 +83,14 @@ button, a { font-family: inherit; }
   pointer-events: none;
 }
 
+/* When WebView blocks autoplay, expose the player's own Play button. Keep
+   the rest of the slide available for vertical scrolling. */
+.slide.is-gesture-required .player-slot {
+  z-index: 3;
+  pointer-events: auto;
+  clip-path: circle(76px at 50% 48%);
+}
+
 .player-slot iframe,
 .player-slot > div,
 .player-slot video {
@@ -99,6 +107,8 @@ button, a { font-family: inherit; }
   inset: 0;
   z-index: 2;
   overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   scroll-snap-type: y mandatory;
   scrollbar-width: none;
 }
@@ -107,7 +117,7 @@ button, a { font-family: inherit; }
 
 .slide {
   position: relative;
-  height: 100cqh;
+  height: 100%;
   scroll-snap-align: start;
   scroll-snap-stop: always;
 }
@@ -126,6 +136,7 @@ button, a { font-family: inherit; }
 
 .playback-state { position: absolute; z-index: 3; top: 48%; left: 50%; display: none; transform: translate(-50%, -50%); pointer-events: none; }
 .slide.is-active.is-paused .playback-state { display: block; }
+.slide.is-active.is-gesture-required .playback-state { display: none; }
 .playback-pause-icon { position: relative; display: block; width: 48px; height: 48px; border-radius: 50%; background: #0007; }
 .playback-pause-icon::after { content: ""; position: absolute; top: 14px; left: 19px; border-top: 10px solid transparent; border-bottom: 10px solid transparent; border-left: 15px solid #fff; }
 

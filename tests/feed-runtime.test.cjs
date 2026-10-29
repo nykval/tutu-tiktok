@@ -4,14 +4,28 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 function harness() {
+  const classes = () => {
+    const values = new Set();
+    return {
+      add(value) { values.add(value); },
+      remove(value) { values.delete(value); },
+      contains(value) { return values.has(value); },
+      toggle(value, force) {
+        const enabled = force === undefined ? !values.has(value) : force;
+        if (enabled) values.add(value);
+        else values.delete(value);
+        return enabled;
+      },
+    };
+  };
   const slides = Array.from({ length: 3 }, () => ({
     querySelector() { return { appendChild() {} }; },
-    classList: { toggle() {} },
+    classList: classes(),
   }));
   const element = () => ({
     hidden: false, style: {}, dataset: {},
     addEventListener() {}, setAttribute() {},
-    classList: { toggle() {} },
+    classList: classes(),
     querySelectorAll() { return slides; },
   });
   const nodes = new Map();
@@ -34,6 +48,7 @@ function harness() {
     setTimeout() { return 1; }, clearTimeout() {}, setInterval() { return 1; },
   });
   vm.runInContext(fs.readFileSync("feed.js", "utf8"), context);
+  context.testSlides = slides;
   return context;
 }
 
@@ -81,4 +96,24 @@ test("quality cap adapts after a stall", () => {
   assert.equal(vm.runInContext("qualityCap()", context), 720);
   vm.runInContext("constrainedUntil = Date.now() + 30000", context);
   assert.equal(vm.runInContext("qualityCap()", context), 480);
+});
+
+test("blocked autoplay exposes a direct Play tap and resumes after the player starts", async () => {
+  const context = harness();
+  context.testPlayer = {
+    play: async () => { throw Object.assign(new Error("gesture required"), { name: "NotAllowedError" }); },
+    mute: async () => {},
+    pause: async () => {},
+    getCurrentTime: async () => 0,
+    getDuration: async () => 30,
+    isMuted: async () => true,
+  };
+  vm.runInContext('FEED = [{ id: "one" }]; player = testPlayer; generation = 1;', context);
+  await vm.runInContext("startPlayback(player)", context);
+  assert.equal(context.testSlides[0].classList.contains("is-gesture-required"), true);
+  assert.equal(vm.runInContext("userPaused", context), true);
+
+  vm.runInContext("markPlaying(player, 1)", context);
+  assert.equal(context.testSlides[0].classList.contains("is-gesture-required"), false);
+  assert.equal(vm.runInContext("userPaused", context), false);
 });

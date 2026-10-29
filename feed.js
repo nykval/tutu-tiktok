@@ -64,6 +64,7 @@ let lastBufferReportAt = 0;
 let playingSince = 0;
 let everPlayedCurrent = false;
 let constrainedUntil = 0;
+let playbackStartedAt = 0;
 
 function recordEvent(type, item = FEED[active]) {
   if (!analyticsReady || !item) return;
@@ -406,7 +407,7 @@ function playerOptions(id, autoPlay = false, preload = "auto") {
     ui: {
       language: "ru",
       controls: false,
-      mainPlayButton: false,
+      mainPlayButton: true,
     },
   };
 }
@@ -678,6 +679,11 @@ function bindPlayer(instance, token) {
 
 function markPlaying(instance, token) {
   if (token !== generation || instance !== player) return;
+  const slide = slides()[active];
+  if (slide?.classList.contains("is-gesture-required")) {
+    slide.classList.remove("is-gesture-required");
+    userPaused = false;
+  }
   const firstConfirmation = !playbackConfirmed;
   if (firstConfirmation) playingSince = Date.now();
   clearTimeout(playbackTimeout);
@@ -704,6 +710,22 @@ function markPlaying(instance, token) {
   }).catch(() => {});
 }
 
+function offerDirectPlay(instance, token) {
+  if (token !== generation || instance !== player) return;
+  userPaused = true;
+  clearTimeout(playbackTimeout);
+  playbackTimeout = 0;
+  clearTimeout(playbackRetryTimer);
+  playbackRetryTimer = 0;
+  if (FEED[active]?.source !== "upload") slides()[active]?.classList.add("is-gesture-required");
+  playbackState("paused");
+}
+
+function isIOS() {
+  return /iPhone|iPad|iPod/.test(navigator.userAgent || "") ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
 function schedulePlaybackCheck(instance, token, delay = 1200) {
   clearTimeout(playbackRetryTimer);
   playbackRetryTimer = setTimeout(async () => {
@@ -716,6 +738,10 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
         if (Number.isFinite(time) && time > 0) {
           markPlaying(instance, token);
           paintProgress(time);
+          return;
+        }
+        if (isIOS() && playbackStartedAt && Date.now() - playbackStartedAt > 5000) {
+          offerDirectPlay(instance, token);
           return;
         }
         schedulePlaybackCheck(instance, token, 500);
@@ -733,6 +759,10 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
       } catch (error) { /* плеер может ещё загружаться */ }
     }
     if (playbackAttempts >= 3) {
+      if (isIOS()) {
+        offerDirectPlay(instance, token);
+        return;
+      }
       // Плеер может оставаться на паузе, пока загружает первый сегмент.
       schedulePlaybackCheck(instance, token, 2000);
       return;
@@ -778,7 +808,9 @@ function watchForStall(token) {
   if (playbackTimeout) return;
   playbackTimeout = setTimeout(() => {
     playbackTimeout = 0;
-    if (token === generation && !userPaused && !document.hidden) failPlayback("Видео загружается слишком долго.");
+    if (token !== generation || userPaused || document.hidden) return;
+    if (isIOS() && !everPlayedCurrent && player) offerDirectPlay(player, token);
+    else failPlayback("Видео загружается слишком долго.");
   }, recoveryCount ? 16000 : 12000);
 }
 
@@ -815,6 +847,7 @@ function show(index) {
   scrub.style.width = "0%";
   recordEvent("view");
   slides().forEach((slide, i) => slide.classList.toggle("is-active", i === active));
+  slides().forEach((slide) => slide.classList.remove("is-gesture-required"));
   loadOfferImages(active);
   muted = !soundWanted;
   revealActive();
@@ -826,8 +859,10 @@ function show(index) {
 
 function mount(index) {
   const token = ++generation;
+  slides()[index]?.classList.remove("is-gesture-required");
   mountingIndex = index;
   playbackAttempts = 0;
+  playbackStartedAt = 0;
   playbackConfirmed = false;
   mutedAutoplayFallbackTried = false;
   bufferedUntil = 0;
@@ -855,6 +890,7 @@ async function startPlayback(instance) {
   if (userPaused || document.hidden || instance !== player) return;
   const token = generation;
   if (startRequest?.instance === instance && startRequest.token === token) return startRequest.promise;
+  if (!playbackStartedAt) playbackStartedAt = Date.now();
   const promise = (async () => {
     try { await instance.play(); }
     catch (error) {
@@ -862,21 +898,16 @@ async function startPlayback(instance) {
         if (soundWanted) {
           try {
             await instance.mute();
+            if (token !== generation || instance !== player) return;
             muted = true;
             await instance.play();
           } catch (fallbackError) {
-            if (fallbackError?.name === "NotAllowedError") {
-              userPaused = true;
-              clearTimeout(playbackTimeout);
-              playbackTimeout = 0;
-              playbackState("paused");
+            if (token === generation && instance === player && fallbackError?.name === "NotAllowedError") {
+              offerDirectPlay(instance, token);
             }
           }
         } else {
-          userPaused = true;
-          clearTimeout(playbackTimeout);
-          playbackTimeout = 0;
-          playbackState("paused");
+          offerDirectPlay(instance, token);
         }
       }
     }
@@ -1058,6 +1089,7 @@ async function togglePlayback() {
       userPaused = false;
       playbackConfirmed = false;
       playbackAttempts = 0;
+      playbackStartedAt = 0;
       playbackState("buffering");
       watchForStall(generation);
       await startPlayback(currentPlayer);
@@ -1126,6 +1158,11 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (!event.target.closest("#feed") || event.target.closest("a") || !player) return;
+  if (userPaused) {
+    cancelPlaybackTap();
+    void togglePlayback();
+    return;
+  }
   queuePlaybackTap(async () => {
     if (muted && soundWanted) {
       const currentPlayer = player;
