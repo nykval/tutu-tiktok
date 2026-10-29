@@ -137,7 +137,7 @@ function openPreview(item) {
   if (previewDialog.open) return;
   document.getElementById("preview-title").textContent = item.title;
   const frame = el("iframe", "preview-frame");
-  frame.src = `index.html?video=${encodeURIComponent(item.id)}&preview=1`;
+  frame.src = `feed.html?video=${encodeURIComponent(item.id)}&preview=1`;
   frame.title = `Предпросмотр: ${item.title}`;
   frame.allow = "autoplay; fullscreen; picture-in-picture";
   document.getElementById("preview-body").replaceChildren(frame);
@@ -193,7 +193,7 @@ function renderCard(item) {
   popup.append(menuAction("Предпросмотр", "eye", () => { menu.open = false; openPreview(item); }));
   const feedLink = el("a", "menu-action", "Открыть в ленте");
   feedLink.prepend(icon("link"));
-  feedLink.href = `index.html?video=${encodeURIComponent(item.id)}`;
+  feedLink.href = `feed.html?video=${encodeURIComponent(item.id)}`;
   feedLink.target = "_blank";
   feedLink.rel = "noopener";
   popup.append(feedLink);

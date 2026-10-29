@@ -468,6 +468,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     mimetypes.add_type("text/javascript", ".js")
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"Лента: http://127.0.0.1:{args.port}/", flush=True)
-    print(f"Админка: http://127.0.0.1:{args.port}/admin.html", flush=True)
+    print(f"Админка: http://127.0.0.1:{args.port}/", flush=True)
+    print(f"Лента: http://127.0.0.1:{args.port}/feed.html", flush=True)
     server.serve_forever()
