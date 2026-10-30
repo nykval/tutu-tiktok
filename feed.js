@@ -454,13 +454,17 @@ function qualityCap() {
   return connection?.effectiveType === "4g" ? 720 : 480;
 }
 
+function mobileAutoplayMuted() {
+  return isIOS() || /Android|Mobile/i.test(navigator.userAgent || "");
+}
+
 function playerOptions(id, autoPlay = false, preload = "auto") {
   return {
     url: "https://kinescope.io/" + id,
     size: { width: "100%", height: "100%" },
     behavior: {
       autoPlay,
-      muted: !soundWanted,
+      muted: !soundWanted || (autoPlay && mobileAutoplayMuted()),
       loop: true,
       playsInline: true,
       preload,
@@ -480,7 +484,7 @@ function playerOptions(id, autoPlay = false, preload = "auto") {
 function createLocalPlayer(host, item, autoPlay = false, preload = "auto") {
   const video = document.createElement("video");
   video.src = item.mediaUrl;
-  video.muted = !soundWanted;
+  video.muted = !soundWanted || (autoPlay && mobileAutoplayMuted());
   video.autoplay = autoPlay;
   video.loop = true;
   video.playsInline = true;
