@@ -10,6 +10,7 @@ KINDS = {"streams", "recordings", "streamers", "products"}
 PRODUCT_TYPES = {"hotel", "transport", "car", "tour", "other"}
 STREAM_STATUSES = {"planned", "live", "finished"}
 CURRENCIES = {"RUB", "USD", "EUR"}
+TUTU_DEEPLINK_SCHEME = re.compile(r"^tutu[a-z0-9+.-]*$", re.IGNORECASE)
 
 
 def string(body, key, maximum, required=False):
@@ -32,6 +33,15 @@ def url(body, key, required=False, local_media=False):
     if parsed.scheme != "https" or not parsed.netloc:
         raise ValueError("Ссылка должна начинаться с https://")
     return value
+
+
+def offer_url(value):
+    parsed = urlsplit(value.strip())
+    is_web = parsed.scheme == "https" and bool(parsed.netloc)
+    is_tutu_deeplink = bool(TUTU_DEEPLINK_SCHEME.fullmatch(parsed.scheme)) and bool(parsed.netloc or parsed.path)
+    if not (is_web or is_tutu_deeplink):
+        raise ValueError("Ссылка оффера должна быть https:// или диплинком Туту")
+    return value.strip()
 
 
 def optional_date(body, key):

@@ -358,8 +358,29 @@ function closeOfferViewer(fromHistory = false) {
   }
 }
 
+function isTutuDeeplink(value) {
+  try {
+    const url = new URL(value);
+    return /^tutu[a-z0-9+.-]*:$/i.test(url.protocol) && !!(url.host || url.pathname);
+  } catch (error) {
+    return false;
+  }
+}
+
+function openTutuDeeplink(url) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.click();
+}
+
 function openOfferViewer(url, item) {
   if (!url || !item) return;
+  if (isTutuDeeplink(url)) {
+    openTutuDeeplink(url);
+    return;
+  }
   const returnUrl = new URL(location.href);
   returnUrl.searchParams.set("video", item.id);
   returnUrl.searchParams.set("offer", "1");

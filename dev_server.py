@@ -11,7 +11,7 @@ import threading
 import uuid
 from datetime import date, datetime
 
-from admin_store import KINDS, can_delete, report, validate_entity
+from admin_store import KINDS, can_delete, offer_url, report, validate_entity
 
 
 ROOT = Path(__file__).resolve().parent
@@ -325,9 +325,7 @@ class Handler(SimpleHTTPRequestHandler):
                 title, price, href = offer.get("title"), offer.get("price", ""), offer.get("href")
                 if not isinstance(title, str) or not title.strip() or len(title.strip()) > 100 or not isinstance(price, str) or len(price.strip()) > 80 or not isinstance(href, str):
                     raise ValueError("Проверьте название, цену и ссылку оффера")
-                parsed = urlsplit(href.strip())
-                if parsed.scheme != "https" or not parsed.netloc:
-                    raise ValueError("Ссылка оффера должна начинаться с https://")
+                href = offer_url(href)
                 label = offer.get("label", title)
                 image = offer.get("image")
                 if not isinstance(label, str) or len(label) > 1000:
