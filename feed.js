@@ -7,6 +7,7 @@ const scrub = document.getElementById("scrub");
 const seek = document.getElementById("seek");
 const retry = document.getElementById("retry");
 const LIKE_COUNTS_KEY = "tututiktok-like-counts-v1";
+const RETURN_VIDEO_KEY = "tututiktok-return-video-v1";
 
 function loadLikeCounts() {
   try {
@@ -276,6 +277,8 @@ function render() {
       const transportOffer = !hotelOffer && isTransportOffer(offer);
       card.className = ["offer", hotelOffer && "offer--hotel", transportOffer && "offer--transport"].filter(Boolean).join(" ");
       card.href = offer.href;
+      card.target = "_blank";
+      card.rel = "noopener noreferrer";
       card.setAttribute("aria-label", offer.label || offer.title);
 
       let thumb;
@@ -1144,6 +1147,9 @@ document.addEventListener("click", async (event) => {
       const returnUrl = new URL(location.href);
       returnUrl.searchParams.set("video", item.id);
       history.replaceState(history.state, "", returnUrl);
+      try {
+        sessionStorage.setItem(RETURN_VIDEO_KEY, JSON.stringify({ videoId: item.id, at: Date.now() }));
+      } catch (error) { /* session storage may be unavailable */ }
     }
     return;
   }
