@@ -449,7 +449,7 @@ function formOffers() {
   try { url = new URL(href); } catch (error) { throw new Error("Проверьте ссылку оффера"); }
   const isWebUrl = url.protocol === "https:" && !!url.host;
   const isTutuDeeplink = /^tutu[a-z0-9+.-]*:$/i.test(url.protocol) && !!(url.host || url.pathname);
-  if (!isWebUrl && !isTutuDeeplink) throw new Error("Ссылка оффера должна быть https:// или диплинком Туту");
+  if (!isWebUrl && !isTutuDeeplink) throw new Error("Укажите https:// или диплинк tututransportapp://");
   offers.push({ title, price, href, ...(productId ? { productId } : {}) });
   return offers;
 }
