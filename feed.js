@@ -6,6 +6,10 @@ const status = document.getElementById("status");
 const scrub = document.getElementById("scrub");
 const seek = document.getElementById("seek");
 const retry = document.getElementById("retry");
+const offerViewer = document.getElementById("offer-viewer");
+const offerViewerClose = document.getElementById("offer-viewer-close");
+const offerViewerFrame = document.getElementById("offer-viewer-frame");
+const offerViewerExternal = document.getElementById("offer-viewer-external");
 const LIKE_COUNTS_KEY = "tututiktok-like-counts-v1";
 const RETURN_VIDEO_KEY = "tututiktok-return-video-v1";
 
@@ -38,6 +42,7 @@ const ICONS = {
 };
 
 let player = null;
+let offerViewerWasPlaying = false;
 let active = 0;
 let muted = false;
 let soundWanted = true;
@@ -277,8 +282,6 @@ function render() {
       const transportOffer = !hotelOffer && isTransportOffer(offer);
       card.className = ["offer", hotelOffer && "offer--hotel", transportOffer && "offer--transport"].filter(Boolean).join(" ");
       card.href = offer.href;
-      card.target = "_blank";
-      card.rel = "noopener noreferrer";
       card.setAttribute("aria-label", offer.label || offer.title);
 
       let thumb;
@@ -333,6 +336,46 @@ function setLikeState(action, on) {
   saveLikeCounts();
   if (on) recordEvent("like", item);
 }
+
+function closeOfferViewer(fromHistory = false) {
+  if (offerViewer.hidden) return;
+  if (!fromHistory && history.state?.offerViewer) {
+    history.back();
+    return;
+  }
+  offerViewer.hidden = true;
+  offerViewerFrame.src = "about:blank";
+  offerViewerExternal.href = "#";
+  const shouldResume = offerViewerWasPlaying;
+  offerViewerWasPlaying = false;
+  if (shouldResume && player && !document.hidden) {
+    userPaused = false;
+    playbackConfirmed = false;
+    playbackAttempts = 0;
+    playbackState("buffering");
+    watchForStall(generation);
+    void startPlayback(player);
+  }
+}
+
+function openOfferViewer(url, item) {
+  if (!url || !item) return;
+  const returnUrl = new URL(location.href);
+  returnUrl.searchParams.set("video", item.id);
+  returnUrl.searchParams.set("offer", "1");
+  history.pushState({ ...(history.state || {}), offerViewer: true }, "", returnUrl);
+  offerViewerWasPlaying = !!player && !userPaused && document.documentElement.dataset.playback === "playing";
+  if (player && offerViewerWasPlaying) player.pause().catch(() => {});
+  offerViewerExternal.href = url;
+  offerViewerFrame.src = url;
+  offerViewer.hidden = false;
+}
+
+offerViewerClose.addEventListener("click", () => closeOfferViewer());
+window.addEventListener("popstate", () => {
+  if (offerViewer.hidden) return;
+  closeOfferViewer(true);
+});
 
 function showDoubleTapLike(slide, event) {
   const burst = document.createElement("span");
@@ -1141,15 +1184,14 @@ retry.addEventListener("click", () => {
 document.addEventListener("click", async (event) => {
   const offer = event.target.closest(".offer");
   if (offer) {
+    event.preventDefault();
     recordEvent("offer_click");
     const item = FEED[Number(offer.closest(".slide")?.dataset.index)];
     if (item) {
-      const returnUrl = new URL(location.href);
-      returnUrl.searchParams.set("video", item.id);
-      history.replaceState(history.state, "", returnUrl);
       try {
         sessionStorage.setItem(RETURN_VIDEO_KEY, JSON.stringify({ videoId: item.id, at: Date.now() }));
       } catch (error) { /* session storage may be unavailable */ }
+      openOfferViewer(offer.href, item);
     }
     return;
   }

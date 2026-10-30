@@ -68,6 +68,64 @@ button, a { font-family: inherit; }
   container-type: size;
 }
 
+.offer-viewer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f7f7fb;
+}
+
+.offer-viewer[hidden] { display: none; }
+
+.offer-viewer-bar {
+  display: flex;
+  align-items: center;
+  min-height: 54px;
+  padding: 8px 12px;
+  color: #24263b;
+  background: #fff;
+  border-bottom: 1px solid #e5e5ec;
+  box-shadow: 0 2px 8px rgb(20 23 45 / 8%);
+}
+
+.offer-viewer-close,
+.offer-viewer-external {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  color: #24263b;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  font-size: 30px;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.offer-viewer-close:active,
+.offer-viewer-external:active { background: #f0eff8; }
+
+.offer-viewer-title {
+  flex: 1;
+  padding: 0 10px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.offer-viewer-external { font-size: 22px; }
+
+.offer-viewer-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: #fff;
+}
+
 @media (max-aspect-ratio: 9/16) {
   .frame {
     --feed-safe-bottom: 0px;

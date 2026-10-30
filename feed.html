@@ -23,6 +23,14 @@
       <div class="scrub">
         <div class="scrub-bar"><div class="scrub-fill" id="scrub"></div><input id="seek" class="seek" type="range" min="0" max="1000" value="0" aria-label="Перемотать видео" /></div>
       </div>
+      <section class="offer-viewer" id="offer-viewer" hidden aria-label="Оффер">
+        <div class="offer-viewer-bar">
+          <button class="offer-viewer-close" id="offer-viewer-close" type="button" aria-label="Вернуться в ленту">×</button>
+          <span class="offer-viewer-title">Оффер</span>
+          <a class="offer-viewer-external" id="offer-viewer-external" href="#" target="_blank" rel="noopener noreferrer" aria-label="Открыть оффер отдельно">↗</a>
+        </div>
+        <iframe class="offer-viewer-frame" id="offer-viewer-frame" title="Оффер" src="about:blank"></iframe>
+      </section>
       <p class="status" id="status" hidden></p>
       <button class="retry-button" id="retry" type="button" hidden>Повторить</button>
     </div>
@@ -35,6 +43,6 @@
   </script>
   <script async src="https://player.kinescope.io/latest/iframe.player.js"></script>
   <script src="feed-data.js?v=4"></script>
-  <script src="feed.js?v=51"></script>
+  <script src="feed.js?v=52"></script>
 </body>
 </html>
