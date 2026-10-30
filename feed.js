@@ -276,8 +276,6 @@ function render() {
       const transportOffer = !hotelOffer && isTransportOffer(offer);
       card.className = ["offer", hotelOffer && "offer--hotel", transportOffer && "offer--transport"].filter(Boolean).join(" ");
       card.href = offer.href;
-      card.target = "_blank";
-      card.rel = "noopener noreferrer";
       card.setAttribute("aria-label", offer.label || offer.title);
 
       let thumb;
@@ -1138,7 +1136,17 @@ retry.addEventListener("click", () => {
 });
 
 document.addEventListener("click", async (event) => {
-  if (event.target.closest(".offer")) recordEvent("offer_click");
+  const offer = event.target.closest(".offer");
+  if (offer) {
+    recordEvent("offer_click");
+    const item = FEED[Number(offer.closest(".slide")?.dataset.index)];
+    if (item) {
+      const returnUrl = new URL(location.href);
+      returnUrl.searchParams.set("video", item.id);
+      history.replaceState(history.state, "", returnUrl);
+    }
+    return;
+  }
   const action = event.target.closest("[data-action]");
   if (action) {
     // Action buttons must never bubble into the feed playback handler.
@@ -1298,6 +1306,10 @@ window.addEventListener("pagehide", () => {
   releasePreloads();
   if (player) player.destroy().catch(() => {});
   if (cachedPrevious) cachedPrevious.player.destroy().catch(() => {});
+});
+
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) location.reload();
 });
 
 setInterval(() => {
