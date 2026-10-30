@@ -1,4 +1,5 @@
 const STAY = "6–8 ноября, 2 ночи, 2 взрослых";
+const EMERALD_HOTEL_DEEPLINK = 'tututransportapp://details/hotel?request={"hotelId":"7652300","geoId":"7652300","hotelName":"Изумруд","date":{"type":"offset","value":0},"returnDate":{"type":"offset","value":1},"guests":{"adultCount":1,"children":[]},"b2BData":{"isBusinessTrip":false,"legalId":"0"}}';
 const VERIFIED_TUTU_AUTHOR = {
   id: "c0f3d04374304e9984003b6f448641f5",
   name: "Проверено Туту",
@@ -10,7 +11,7 @@ const DEFAULT_FEED = [
     id: "ns54L7UnjimHvsCGa9b1j6",
     title: "Цветущий Дагестан",
     text: "Цветущий Дагестан. Короткий ролик про Махачкалу: в реестре у него нет отдельного текста, только это название. Ниже отель, который Туту показал первым на эти даты.",
-    offers: [hotel("Отель MoonLit", "8549 ₽ за 2 ночи", "Махачкала, Республика Дагестан. Бесплатная отмена. Завтрак Туту не указал.", "https://cdn4.tu-tu.ru/static/hotels-photo/hotels-photo/2247a56f2a08085dc056fe52b7ef01dc2aa00816.6bf2fefcac2e07ffb6f3a65b83b31762c4b2ea49.jpeg", "https://hotel.tutu.ru/offers/details?business=0&check_in=2026-11-06&check_out=2026-11-08&geo_id=10558306&geo_name=%D0%9C%D0%B0%D1%85%D0%B0%D1%87%D0%BA%D0%B0%D0%BB%D0%B0&room%5B0%5D=2&search_id=908715a3e3eaec1ea677535fa1b0a8cc")],
+    offers: [hotel("Отель MoonLit", "8549 ₽ за 2 ночи", "Махачкала, Республика Дагестан. Бесплатная отмена. Завтрак Туту не указал.", "https://cdn4.tu-tu.ru/static/hotels-photo/hotels-photo/2247a56f2a08085dc056fe52b7ef01dc2aa00816.6bf2fefcac2e07ffb6f3a65b83b31762c4b2ea49.jpeg", EMERALD_HOTEL_DEEPLINK)],
   },
   {
     id: "eFKMXotDNvs6g9Kjqgrytx",
@@ -89,6 +90,6 @@ function hotel(title, price, detail, image, href) {
     price: price,
     label: title + ". " + STAY + ". " + detail + " Цена — итог за весь срок, снимок поиска 20 октября.",
     image: image,
-    href: href + "&utm_source=grok&utm_medium=mcp",
+    href: /^https?:\/\//i.test(href) ? href + (href.includes("?") ? "&" : "?") + "utm_source=grok&utm_medium=mcp" : href,
   };
 }
