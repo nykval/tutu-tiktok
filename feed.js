@@ -451,7 +451,7 @@ function qualityCap() {
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   if (connection?.saveData || /2g/.test(connection?.effectiveType || "")) return 360;
   if (recoveryCount || Date.now() < constrainedUntil || connection?.effectiveType === "3g") return 480;
-  return 720;
+  return connection?.effectiveType === "4g" ? 720 : 480;
 }
 
 function playerOptions(id, autoPlay = false, preload = "auto") {
