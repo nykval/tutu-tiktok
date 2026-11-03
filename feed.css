@@ -43,6 +43,8 @@
 html, body {
   margin: 0;
   height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: #111;
   color: var(--ink);
   font-family: "Tutu Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -51,7 +53,7 @@ html, body {
 button, a { font-family: inherit; }
 
 .phone {
-  height: 100dvh;
+  height: 100svh;
   display: grid;
   place-items: center;
   background: #111;
@@ -61,8 +63,8 @@ button, a { font-family: inherit; }
   --feed-safe-bottom: env(safe-area-inset-bottom);
   --feed-letterbox-inset: 0px;
   position: relative;
-  width: min(100vw, calc(100dvh * 9 / 16));
-  height: min(100dvh, calc(100vw * 16 / 9));
+  width: min(100vw, calc(100svh * 9 / 16));
+  height: 100svh;
   overflow: hidden;
   background: #000;
   container-type: size;
@@ -146,7 +148,8 @@ button, a { font-family: inherit; }
 .slide.is-gesture-required .player-slot {
   z-index: 3;
   pointer-events: auto;
-  clip-path: circle(76px at 50% 48%);
+  clip-path: circle(36px at 50% 50%);
+  opacity: 0.001;
 }
 
 .player-slot iframe,
@@ -164,7 +167,10 @@ button, a { font-family: inherit; }
   position: absolute;
   inset: 0;
   z-index: 2;
-  overflow-y: scroll;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   scroll-snap-type: y mandatory;
@@ -176,6 +182,8 @@ button, a { font-family: inherit; }
 .slide {
   position: relative;
   height: 100%;
+  min-height: 100%;
+  overflow: hidden;
   scroll-snap-align: start;
   scroll-snap-stop: always;
 }
@@ -192,7 +200,7 @@ button, a { font-family: inherit; }
 
 .slide.is-revealed .poster { display: none; }
 
-.playback-state { position: absolute; z-index: 3; top: 48%; left: 50%; display: none; transform: translate(-50%, -50%); pointer-events: none; }
+.playback-state { position: absolute; z-index: 3; top: 50%; left: 50%; display: none; transform: translate(-50%, -50%); pointer-events: none; }
 .slide.is-active.is-paused .playback-state { display: block; }
 .slide.is-active.is-gesture-required .playback-state { display: none; }
 .playback-pause-icon { display: block; width: 72px; height: 72px; background: url("assets/brand/feed-play.png") center / contain no-repeat; }
@@ -524,9 +532,11 @@ button, a { font-family: inherit; }
 .sound-button[hidden] { display: none; }
 .status[data-kind="play-prompt"] { top: calc(48% + 88px); pointer-events: none; text-shadow: 0 1px 4px #000; }
 
-.first-play-button { position: absolute; z-index: 6; top: 48%; left: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 72px; height: 72px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; cursor: pointer; }
+.first-play-button { position: absolute; z-index: 6; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 72px; height: 72px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; cursor: pointer; }
 .first-play-button[hidden] { display: none; }
 .first-play-button:disabled { cursor: wait; }
 .first-play-button:focus-visible { outline: 3px solid #fff; outline-offset: 5px; }
 .first-play-icon { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-.frame:has(> .first-play-button:not([hidden])) .playback-state { display: none; }
+.slide:has(> .first-play-button:not([hidden])) .playback-state { display: none; }
+
+.first-play-button[data-native="true"] { pointer-events: none; }

@@ -19,6 +19,7 @@ function harness() {
     };
   };
   const slides = Array.from({ length: 3 }, () => ({
+    appendChild() {},
     querySelector() { return { appendChild() {} }; },
     classList: classes(),
   }));
@@ -385,4 +386,36 @@ test("first gesture releases the opening pause and requests sound immediately", 
   assert.equal(vm.runInContext('awaitingFirstPlay', context), false);
   assert.equal(vm.runInContext('firstPlayButton.hidden', context), true);
   await tick();
+});
+
+
+test("native iframe Playing releases the opening gate instead of immediately pausing it", () => {
+  const context = harness();
+  let pauses = 0;
+  context.instance = {
+    pause: async () => { pauses += 1; },
+    isMuted: async () => false, getCurrentTime: async () => 0, getDuration: async () => 30,
+  };
+  vm.runInContext("FEED = [{ id: 'one' }]; player = instance; generation = 1; awaitingFirstPlay = true; offerDirectPlay(player, 1)", context);
+  assert.equal(vm.runInContext('firstPlayButton.dataset.native', context), 'true');
+  assert.equal(vm.runInContext('status.hidden', context), true);
+  vm.runInContext('markPlaying(player, 1)', context);
+  assert.equal(pauses, 0);
+  assert.equal(vm.runInContext('awaitingFirstPlay', context), false);
+  assert.equal(vm.runInContext('userPaused', context), false);
+  assert.equal(vm.runInContext('firstPlayButton.hidden', context), true);
+});
+
+test("settling a mobile swipe aligns the feed to a whole card", () => {
+  const context = harness();
+  const scrolls = [];
+  context.scrollTo = (value) => scrolls.push(value.top);
+  vm.runInContext(`FEED = [{ id: 'one' }, { id: 'two' }, { id: 'three' }]; feedReady = true;
+    feed.clientHeight = 664; feed.scrollTop = 664 + 180; active = 1; feed.scrollTo = scrollTo;
+    settleScroll();`, context);
+  assert.deepEqual(scrolls, [664]);
+  vm.runInContext('touchingFeed = true; feed.scrollTop = 800; settleScroll()', context);
+  assert.deepEqual(scrolls, [664], 'never fight a finger that is still touching the feed');
+  vm.runInContext('feed.scrollTop = -50', context);
+  assert.equal(vm.runInContext('indexFromScroll()', context), 0);
 });

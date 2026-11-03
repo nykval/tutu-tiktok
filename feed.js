@@ -796,10 +796,15 @@ function bindPlayer(instance, token) {
 
 function markPlaying(instance, token) {
   if (token !== generation || instance !== player) return;
-  if (awaitingFirstPlay) { instance.pause().catch(() => {}); return; }
   const slide = slides()[active];
+  if (awaitingFirstPlay && !slide?.classList.contains("is-gesture-required")) {
+    instance.pause().catch(() => {});
+    return;
+  }
   if (slide?.classList.contains("is-gesture-required")) {
     slide.classList.remove("is-gesture-required");
+    awaitingFirstPlay = false;
+    firstPlayButton.hidden = true;
     userPaused = false;
   }
   const firstConfirmation = !playbackConfirmed;
@@ -831,6 +836,7 @@ function markPlaying(instance, token) {
   else instance.isMuted().then((value) => {
     if (token === generation && instance === player) {
       muted = value;
+      if (!value) soundUnlocked = true;
       updateSoundButton();
     }
   }).catch(() => {});
@@ -843,15 +849,15 @@ function offerDirectPlay(instance, token) {
   playbackTimeout = 0;
   clearTimeout(playbackRetryTimer);
   playbackRetryTimer = 0;
-  if (FEED[active]?.source !== "upload") {
-    slides()[active]?.classList.add("is-gesture-required");
-    status.dataset.kind = "play-prompt";
-    status.textContent = "Нажмите ▶, чтобы запустить видео";
-    status.hidden = false;
-  } else {
-    retry.textContent = "Воспроизвести";
-    retry.hidden = false;
-  }
+  const slide = slides()[active];
+  slide?.appendChild(firstPlayButton);
+  firstPlayButton.hidden = false;
+  firstPlayButton.disabled = false;
+  const native = FEED[active]?.source !== "upload";
+  firstPlayButton.dataset.native = String(native);
+  if (native) slide?.classList.add("is-gesture-required");
+  status.hidden = true;
+  retry.hidden = true;
   playbackState("paused");
 }
 
@@ -997,6 +1003,9 @@ function mount(index) {
   cancelPlayerCreation(pendingMountHost);
   pendingMountHost = null;
   slides()[index]?.classList.remove("is-gesture-required");
+  slides()[index]?.appendChild(firstPlayButton);
+  firstPlayButton.hidden = !awaitingFirstPlay;
+  firstPlayButton.dataset.native = "false";
   mountingIndex = index;
   if (awaitingFirstPlay) {
     userPaused = true;
@@ -1148,8 +1157,7 @@ async function openVideo(index, token) {
   document.documentElement.dataset.playerReadyMs = String(Date.now() - switchStartedAt);
   status.hidden = true;
   if (awaitingFirstPlay) {
-    firstPlayButton.disabled = false;
-    playbackState("paused");
+    offerDirectPlay(instance, token);
     await instance.pause().catch(() => {});
     return;
   }
@@ -1158,7 +1166,7 @@ async function openVideo(index, token) {
 
 function indexFromScroll() {
   const height = feed.clientHeight || 1;
-  return Math.round(feed.scrollTop / height);
+  return Math.max(0, Math.min(FEED.length - 1, Math.round(feed.scrollTop / height)));
 }
 
 function boot(nextFactory) {
@@ -1211,7 +1219,8 @@ async function loadFeed() {
     return;
   }
   render();
-  playbackState("buffering");
+  slides()[active]?.appendChild(firstPlayButton);
+  playbackState("paused");
   if (active) feed.scrollTop = active * feed.clientHeight;
   feedReady = true;
   requestAnimationFrame(() => requestAnimationFrame(fitCaptions));
@@ -1222,36 +1231,53 @@ async function loadFeed() {
 
 loadFeed();
 let resizeFrame = 0;
+let layoutHeight = feed.clientHeight;
 window.addEventListener("resize", () => {
   if (resizeFrame) return;
   resizeFrame = requestAnimationFrame(() => {
     resizeFrame = 0;
-    if (feedReady) feed.scrollTop = active * feed.clientHeight;
+    if (feedReady && feed.clientHeight !== layoutHeight) {
+      layoutHeight = feed.clientHeight;
+      feed.scrollTop = active * layoutHeight;
+    }
     fitCaptions();
   });
 });
 
 let scrollFrame = 0;
 let scrollSettleTimer = 0;
+let touchingFeed = false;
+
+function settleScroll() {
+  clearTimeout(scrollSettleTimer);
+  scrollSettleTimer = 0;
+  if (!feedReady || touchingFeed || !FEED.length) return;
+  const index = indexFromScroll();
+  const top = index * feed.clientHeight;
+  if (Math.abs(feed.scrollTop - top) > 1) {
+    feed.scrollTo({ top, behavior: "smooth" });
+  }
+  if (index !== active) show(index);
+}
+
+feed.addEventListener("touchstart", () => { touchingFeed = true; }, { passive: true });
+function endFeedTouch() {
+  touchingFeed = false;
+  clearTimeout(scrollSettleTimer);
+  scrollSettleTimer = setTimeout(settleScroll, 180);
+}
+feed.addEventListener("touchend", endFeedTouch, { passive: true });
+feed.addEventListener("touchcancel", endFeedTouch, { passive: true });
+feed.addEventListener("scrollend", settleScroll);
 feed.addEventListener("scroll", () => {
   clearTimeout(scrollSettleTimer);
-  scrollSettleTimer = setTimeout(() => {
-    scrollSettleTimer = 0;
-    const index = indexFromScroll();
-    if (index !== active) show(index);
-  }, 80);
+  scrollSettleTimer = setTimeout(settleScroll, 180);
   if (scrollFrame) return;
   scrollFrame = requestAnimationFrame(() => {
     scrollFrame = 0;
     const index = indexFromScroll();
     const height = feed.clientHeight || 1;
-    // Switch once the incoming slide owns 60% of the viewport. Hysteresis
-    // avoids toggling players when the gesture hovers around the midpoint.
-    if (index !== active && Math.abs(feed.scrollTop / height - active) >= 0.6) {
-      clearTimeout(scrollSettleTimer);
-      scrollSettleTimer = 0;
-      show(index);
-    }
+    if (index !== active && Math.abs(feed.scrollTop / height - active) >= 0.6) show(index);
   });
 }, { passive: true });
 
@@ -1281,7 +1307,7 @@ async function togglePlayback() {
       clearTimeout(playbackTimeout);
       playbackTimeout = 0;
       await currentPlayer.pause();
-      playbackState("paused");
+      if (currentPlayer === player) offerDirectPlay(currentPlayer, generation);
     }
   } catch (error) { showPlaybackError("Не удалось продолжить воспроизведение."); }
 }
