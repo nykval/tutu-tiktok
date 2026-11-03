@@ -4,8 +4,8 @@ let feedEnabled = true;
 
 const feed = document.getElementById("feed");
 const status = document.getElementById("status");
-const scrub = document.getElementById("scrub");
-const seek = document.getElementById("seek");
+let scrub = document.getElementById("scrub");
+let seek = document.getElementById("seek");
 const retry = document.getElementById("retry");
 const sharedPlayerSlot = document.getElementById("shared-player-slot");
 const firstPlayButton = document.getElementById("first-play-button");
@@ -334,8 +334,21 @@ function render() {
     if (itemOffers.length) dock.appendChild(offers);
 
     slide.appendChild(dock);
+    const progress = document.createElement("div");
+    progress.className = "scrub";
+    progress.innerHTML = '<div class="scrub-bar"><div class="scrub-fill"></div><input class="seek" type="range" min="0" max="1000" value="0" aria-label="Перемотать видео" /></div>';
+    bindSeek(progress.querySelector(".seek"), index, progress.querySelector(".scrub-fill"));
+    slide.appendChild(progress);
     feed.appendChild(slide);
   });
+  selectProgress(active);
+}
+
+function selectProgress(index) {
+  const slide = slides()[index];
+  if (!slide) return;
+  scrub = slide.querySelector(".scrub-fill");
+  seek = slide.querySelector(".seek");
 }
 
 function setLikeState(action, on) {
@@ -522,7 +535,17 @@ function playerOptions(id, autoPlay = false, preload = "auto") {
     },
     ui: {
       language: "ru",
-      controls: false,
+      controls: true,
+      title: false,
+      controlBar: false,
+      progressBar: false,
+      previousButton: false,
+      nextButton: false,
+      playButton: false,
+      volumeButton: false,
+      settingsButton: false,
+      fullscreenButton: false,
+      pipButton: false,
       mainPlayButton: true,
     },
   };
@@ -1005,6 +1028,8 @@ function show(index) {
   clearTimeout(preloadTimer);
   const cachedReturn = cachedPrevious?.index === next;
   active = next;
+  seeking = false;
+  selectProgress(active);
   hasFrame = cachedReturn;
   playbackConfirmed = false;
   userPaused = false;
@@ -1197,7 +1222,6 @@ async function openSharedVideo(index, token) {
     const ids = FEED.filter((item) => item.source !== "upload").map((item) => item.id);
     const options = playerOptions(FEED[index].id, false);
     options.url = "https://kinescope.io/playlist?video_ids=" + ids.map(encodeURIComponent).join(",");
-    options.ui.controls = true;
     sharedPlayerPromise = createKinescopePlayer(host, options, 12000).then((instance) => {
       sharedPlayer = instance;
       sharedTrackIndex = FEED.findIndex((item) => item.source !== "upload");
@@ -1592,7 +1616,7 @@ document.addEventListener("click", async (event) => {
     }
     return;
   }
-  if (!event.target.closest("#feed") || event.target.closest("a") || !player) return;
+  if (!event.target.closest("#feed") || event.target.closest("a, input, button") || !player) return;
   if (userPaused || (muted && soundWanted)) {
     cancelPlaybackTap();
     playFromGesture(player);
@@ -1655,27 +1679,35 @@ setInterval(() => {
   refreshProgress(player, generation);
 }, 1000);
 
-seek.addEventListener("pointerdown", () => { seeking = true; });
-seek.addEventListener("input", () => {
-  seeking = true;
-  const progress = Number(seek.value) / 1000;
-  scrub.style.transform = `scaleX(${progress})`;
-  seek.setAttribute("aria-valuetext", currentDuration > 0 ? `${formatTime(progress * currentDuration)} из ${formatTime(currentDuration)}` : `${Math.round(progress * 100)}%`);
-});
-seek.addEventListener("change", async () => {
-  const currentPlayer = player;
-  const targetTime = Number(seek.value) / 1000 * currentDuration;
-  if (currentPlayer && currentDuration > 0) {
-    try {
-      await currentPlayer.seekTo(targetTime);
-      if (currentPlayer === player) currentTime = targetTime;
+function bindSeek(input, index, fill) {
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("pointerdown", () => { if (index === active) seeking = true; });
+  input.addEventListener("input", () => {
+    if (index !== active) return;
+    seeking = true;
+    const progress = Number(input.value) / 1000;
+    fill.style.transform = `scaleX(${progress})`;
+    input.setAttribute("aria-valuetext", currentDuration > 0 ? `${formatTime(progress * currentDuration)} из ${formatTime(currentDuration)}` : `${Math.round(progress * 100)}%`);
+  });
+  input.addEventListener("change", async () => {
+    if (index !== active) return;
+    const token = generation;
+    const currentPlayer = player;
+    const targetTime = Number(input.value) / 1000 * currentDuration;
+    if (currentPlayer && currentDuration > 0) {
+      try {
+        await currentPlayer.seekTo(targetTime);
+        if (token === generation && currentPlayer === player) currentTime = targetTime;
+      } catch (error) { /* media may not yet allow seeking */ }
     }
-    catch (error) { /* некоторые ролики ещё не допускают перемотку */ }
-  }
-  seeking = false;
-  if (currentPlayer === player) paintProgress();
-});
-seek.addEventListener("pointercancel", () => { seeking = false; paintProgress(); });
+    if (token !== generation) return;
+    seeking = false;
+    paintProgress();
+  });
+  input.addEventListener("pointercancel", () => {
+    if (index === active) { seeking = false; paintProgress(); }
+  });
+}
 
 document.addEventListener("visibilitychange", async () => {
   const currentPlayer = player;

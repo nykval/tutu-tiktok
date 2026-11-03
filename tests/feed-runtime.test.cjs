@@ -569,3 +569,39 @@ test("a queued compositor reveal cannot uncover a different video's iframe", () 
   frames.shift()();
   assert.equal(vm.runInContext('hasFrame', context), false);
 });
+
+
+test("feed UI hides native title, navigation, and timeline while keeping direct Play available", () => {
+  const context = harness();
+  const ui = vm.runInContext("playerOptions('one').ui", context);
+  assert.equal(ui.controls, true);
+  assert.equal(ui.mainPlayButton, true);
+  for (const option of ['title','controlBar','progressBar','previousButton','nextButton']) assert.equal(ui[option], false);
+});
+
+test("progress updates belong to the active card and preserve the outgoing card's bar", () => {
+  const context = harness();
+  context.oldFill = { style: { transform: 'scaleX(0.7)' } };
+  context.newFill = { style: {} };
+  context.newInput = { setAttribute() {} };
+  context.testSlides[1].querySelector = (selector) => selector === '.scrub-fill' ? context.newFill : context.newInput;
+  vm.runInContext('scrub = oldFill; selectProgress(1); currentDuration = 40; paintProgress(10)', context);
+  assert.equal(context.oldFill.style.transform, 'scaleX(0.7)');
+  assert.equal(context.newFill.style.transform, 'scaleX(0.25)');
+  assert.equal(context.newInput.value, '250');
+});
+
+test("a late seek response cannot overwrite progress after swiping to another track", async () => {
+  const context = harness();
+  const handlers = {};
+  let finish;
+  context.input = { value:'500', addEventListener(name, fn) { handlers[name] = fn; } };
+  context.fill = { style: {} };
+  context.instance = { seekTo: () => new Promise(resolve => { finish = resolve; }) };
+  vm.runInContext('player = instance; currentDuration = 40; generation = 1; active = 0; bindSeek(input,0,fill)', context);
+  const pending = handlers.change();
+  vm.runInContext('generation = 2; active = 1; currentTime = 3; seeking = false', context);
+  finish(); await pending;
+  assert.equal(vm.runInContext('currentTime', context), 3);
+  assert.equal(vm.runInContext('seeking', context), false);
+});
