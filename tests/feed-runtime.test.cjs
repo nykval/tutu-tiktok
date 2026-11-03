@@ -201,22 +201,17 @@ test("a cached timestamp does not confirm resumed playback until time advances",
 });
 
 
-test("first Kinescope autoplay starts muted on desktop without changing sound intent", () => {
+test("players request sound at startup and respect an explicit mute preference", () => {
   const context = harness();
-  assert.equal(vm.runInContext("playerOptions('one', true).behavior.muted", context), true);
-  assert.equal(vm.runInContext("soundWanted", context), true);
-  assert.equal(vm.runInContext("playerOptions('two', false).behavior.muted", context), true);
-  vm.runInContext("soundUnlocked = true", context);
+  assert.equal(vm.runInContext("playerOptions('one', true).behavior.muted", context), false);
   assert.equal(vm.runInContext("playerOptions('two', false).behavior.muted", context), false);
   vm.runInContext("soundWanted = false", context);
   assert.equal(vm.runInContext("playerOptions('two', false).behavior.muted", context), true);
 });
 
-test("first uploaded video is muted before loading and starts inline", () => {
+test("uploaded videos request sound and stay inline", () => {
   const context = harness();
-  const video = {
-    load() { assert.equal(this.muted, true); assert.equal(this.defaultMuted, true); },
-  };
+  const video = { load() { assert.equal(this.muted, false); assert.equal(this.defaultMuted, false); } };
   context.document.createElement = () => video;
   context.host = { appendChild() {} };
   vm.runInContext("createLocalPlayer(host, { mediaUrl: '/video.mp4' }, true)", context);
@@ -296,20 +291,6 @@ test("offer overlay prevents playback and neighbor downloads", async () => {
 });
 
 
-test("startup quality returns to adaptive only for the active, buffered player", async () => {
-  const context = harness();
-  const changes = [];
-  context.instance = { setVideoQuality: async (quality) => { changes.push(quality); } };
-  vm.runInContext("player = instance; generation = 1; playbackConfirmed = true; startupQualityPlayers.add(instance); restoreAdaptiveQuality(instance, 1)", context);
-  [...context.testTimers.values()].find((timer) => timer.delay === 6000).fn();
-  await tick();
-  assert.deepEqual(changes, ['auto']);
-  vm.runInContext("restoreAdaptiveQuality(instance, 1); generation = 2", context);
-  [...context.testTimers.values()].find((timer) => timer.delay === 6000).fn();
-  assert.deepEqual(changes, ['auto']);
-});
-
-
 test("rapid mounts cancel obsolete creations and only the last player starts", async () => {
   const context = harness();
   const pending = [];
@@ -331,4 +312,37 @@ test("rapid mounts cancel obsolete creations and only the last player starts", a
   assert.deepEqual(played, [2]);
   assert.deepEqual(destroyed.sort(), [0, 1]);
   assert.equal(vm.runInContext('playerIndex', context), 2);
+});
+
+
+test("unresolved play requests still expose the native Play button", async () => {
+  const context = harness();
+  context.testPlayer = {
+    play: () => new Promise(() => {}), isPaused: async () => true,
+    mute: async () => {},
+  };
+  vm.runInContext("FEED = [{ id: 'one' }]; player = testPlayer; generation = 1; startPlayback(player)", context);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const timer = [...context.testTimers.entries()].find(([, timer]) => timer.delay === 1000);
+    assert.ok(timer, "playback monitor must run while play() is pending");
+    context.testTimers.delete(timer[0]);
+    await timer[1].fn();
+    await tick();
+  }
+  assert.equal(context.testSlides[0].classList.contains('is-gesture-required'), true);
+  assert.equal(vm.runInContext('userPaused', context), true);
+});
+
+test("sound and playback are requested synchronously within the user gesture", async () => {
+  const context = harness();
+  const calls = [];
+  context.testPlayer = {
+    unmute() { calls.push('unmute'); return Promise.resolve(); },
+    play() { calls.push('play'); return Promise.resolve(); },
+    isMuted: async () => false,
+  };
+  vm.runInContext('player = testPlayer; playFromGesture(player)', context);
+  assert.deepEqual(calls, ['unmute', 'play']);
+  await tick();
+  assert.equal(vm.runInContext('muted', context), false);
 });

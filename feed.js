@@ -7,6 +7,7 @@ const status = document.getElementById("status");
 const scrub = document.getElementById("scrub");
 const seek = document.getElementById("seek");
 const retry = document.getElementById("retry");
+const soundButton = document.getElementById("sound-button");
 const offerViewer = document.getElementById("offer-viewer");
 const offerViewerClose = document.getElementById("offer-viewer-close");
 const offerViewerFrame = document.getElementById("offer-viewer-frame");
@@ -457,8 +458,6 @@ let playerIndex = -1;
 let hostSerial = 0;
 let scrollDirection = 1;
 let pendingMountHost = null;
-let qualityUpgradeTimer = 0;
-const startupQualityPlayers = new WeakSet();
 const pendingCreations = new WeakMap();
 const playerHosts = new WeakMap();
 const destroyRequests = new WeakMap();
@@ -487,28 +486,14 @@ function qualityCap() {
   return 720;
 }
 
-function restoreAdaptiveQuality(instance, token) {
-  clearTimeout(qualityUpgradeTimer);
-  qualityUpgradeTimer = setTimeout(() => {
-    qualityUpgradeTimer = 0;
-    if (token !== generation || instance !== player || document.hidden || userPaused || !offerViewer.hidden) return;
-    if (!playbackConfirmed || Date.now() < constrainedUntil || (Date.now() - lastBufferReportAt < 5000 && bufferedUntil - currentTime < 3)) {
-      restoreAdaptiveQuality(instance, token);
-      return;
-    }
-    instance.setVideoQuality("auto").then(() => startupQualityPlayers.delete(instance)).catch(() => {});
-  }, 6000);
-}
-
 function playerOptions(id, autoPlay = false, preload = "auto") {
   return {
     url: "https://kinescope.io/" + id,
     size: { width: "100%", height: "100%" },
     behavior: {
       autoPlay,
-      // Start the first video muted on desktop too: autoplay with sound may
-      // stay paused without rejecting play(), delaying fallback by seconds.
-      muted: !soundWanted || !soundUnlocked || autoPlay,
+      // Prefer sound. The browser may still require a direct user gesture.
+      muted: !soundWanted,
       loop: true,
       playsInline: true,
       preload,
@@ -528,7 +513,7 @@ function playerOptions(id, autoPlay = false, preload = "auto") {
 function createLocalPlayer(host, item, autoPlay = false, preload = "auto") {
   const video = document.createElement("video");
   // Set the autoplay policy before assigning the source or starting a load.
-  video.muted = !soundWanted || !soundUnlocked || autoPlay;
+  video.muted = !soundWanted;
   video.defaultMuted = video.muted;
   video.src = item.mediaUrl;
   video.autoplay = autoPlay;
@@ -737,6 +722,7 @@ function bindPlayer(instance, token) {
     if (currentToken() !== generation || instance !== player) return;
     if (typeof event.data?.muted === "boolean") {
       muted = event.data.muted;
+      updateSoundButton();
     }
   });
   if (instance.Events.Loaded) instance.on(instance.Events.Loaded, () => {
@@ -836,13 +822,13 @@ function markPlaying(instance, token) {
   revealActive();
   if (firstConfirmation) {
     schedulePreload(token, recoveryCount ? 2000 : 250);
-    if (startupQualityPlayers.has(instance)) restoreAdaptiveQuality(instance, token);
   }
   refreshProgress(instance, token);
   if (userPaused || document.hidden || !offerViewer.hidden) instance.pause().catch(() => {});
   else instance.isMuted().then((value) => {
     if (token === generation && instance === player) {
       muted = value;
+      updateSoundButton();
     }
   }).catch(() => {});
 }
@@ -854,7 +840,15 @@ function offerDirectPlay(instance, token) {
   playbackTimeout = 0;
   clearTimeout(playbackRetryTimer);
   playbackRetryTimer = 0;
-  if (FEED[active]?.source !== "upload") slides()[active]?.classList.add("is-gesture-required");
+  if (FEED[active]?.source !== "upload") {
+    slides()[active]?.classList.add("is-gesture-required");
+    status.dataset.kind = "play-prompt";
+    status.textContent = "Нажмите ▶, чтобы запустить видео";
+    status.hidden = false;
+  } else {
+    retry.textContent = "Воспроизвести";
+    retry.hidden = false;
+  }
   playbackState("paused");
 }
 
@@ -898,19 +892,17 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
       } catch (error) { /* плеер может ещё загружаться */ }
     }
     if (playbackAttempts >= 3) {
-      if (isIOS()) {
-        offerDirectPlay(instance, token);
-        return;
-      }
-      // Плеер может оставаться на паузе, пока загружает первый сегмент.
-      schedulePlaybackCheck(instance, token, 2000);
+      offerDirectPlay(instance, token);
       return;
     }
-    startPlayback(instance);
+    void startPlayback(instance);
+    schedulePlaybackCheck(instance, token, 1000);
   }, delay);
 }
 
 function showPlaybackError(message) {
+  delete status.dataset.kind;
+  retry.textContent = "Повторить";
   releasePreloads();
   if (cachedPrevious) {
     destroyPlayer(cachedPrevious.player).catch(() => {});
@@ -948,7 +940,7 @@ function watchForStall(token) {
   playbackTimeout = setTimeout(() => {
     playbackTimeout = 0;
     if (token !== generation || userPaused || document.hidden || !offerViewer.hidden) return;
-    if (isIOS() && !everPlayedCurrent && player) offerDirectPlay(player, token);
+    if (!everPlayedCurrent && player) offerDirectPlay(player, token);
     else failPlayback("Видео загружается слишком долго.");
   }, recoveryCount ? 16000 : 12000);
 }
@@ -999,7 +991,6 @@ function show(index) {
 function mount(index) {
   const token = ++generation;
   cancelPlayerCreation(pendingMountHost);
-  clearTimeout(qualityUpgradeTimer);
   pendingMountHost = null;
   slides()[index]?.classList.remove("is-gesture-required");
   mountingIndex = index;
@@ -1040,6 +1031,9 @@ async function startPlayback(instance) {
   const token = generation;
   if (startRequest?.instance === instance && startRequest.token === token) return startRequest.promise;
   if (!playbackStartedAt) playbackStartedAt = Date.now();
+  // Some WebViews leave play() pending when user interaction is required.
+  // Monitor independently of the promise so the native Play button appears.
+  schedulePlaybackCheck(instance, token, 1000);
   const promise = (async () => {
     try { await instance.play(); }
     catch (error) {
@@ -1140,14 +1134,6 @@ async function openVideo(index, token) {
   playerIndex = index;
   if (soundWanted && soundUnlocked) instance.unmute().catch(() => {});
   bindPlayer(instance, token);
-  if (token === 1 && typeof instance.setVideoQuality === "function") {
-    startupQualityPlayers.add(instance);
-    // Keep the first segment small; after stable playback return to ABR,
-    // retaining the network-aware upper limit configured at creation.
-    instance.setVideoQuality(Math.min(480, qualityCap())).catch(() => {});
-  } else if (startupQualityPlayers.has(instance)) {
-    instance.setVideoQuality("auto").then(() => startupQualityPlayers.delete(instance)).catch(() => {});
-  }
   refreshProgress(instance, token, true);
   document.documentElement.dataset.player = "ready";
   document.documentElement.dataset.playerReadyMs = String(Date.now() - switchStartedAt);
@@ -1285,6 +1271,36 @@ async function togglePlayback() {
   } catch (error) { showPlaybackError("Не удалось продолжить воспроизведение."); }
 }
 
+function playFromGesture(instance) {
+  if (!instance || instance !== player || document.hidden || !offerViewer.hidden) return;
+  const token = generation;
+  userPaused = false;
+  playbackAttempts = 0;
+  playbackConfirmed = false;
+  playbackState("buffering");
+  watchForStall(token);
+  schedulePlaybackCheck(instance, token, 1000);
+  // Both calls must be dispatched in the click handler, before timers/awaits.
+  const volume = soundWanted ? instance.unmute() : instance.mute();
+  const playback = instance.play();
+  Promise.resolve(volume).then(async () => {
+    const value = await instance.isMuted();
+    if (token !== generation || instance !== player) return;
+    muted = value;
+    if (!value) soundUnlocked = true;
+    updateSoundButton();
+  }).catch(() => {});
+  Promise.resolve(playback).catch((error) => {
+    if (token === generation && instance === player && error?.name === "NotAllowedError") offerDirectPlay(instance, token);
+  });
+}
+
+function updateSoundButton() {
+  soundButton.hidden = !player || !muted || !offerViewer.hidden;
+}
+
+soundButton.addEventListener("click", () => playFromGesture(player));
+
 function queuePlaybackTap(handler) {
   clearTimeout(playbackTapTimer);
   playbackTapTimer = window.setTimeout(() => {
@@ -1299,6 +1315,7 @@ function cancelPlaybackTap() {
 }
 
 retry.addEventListener("click", () => {
+  if (userPaused && player) { playFromGesture(player); return; }
   if (!factory && FEED[active]?.source !== "upload") { location.reload(); return; }
   status.hidden = true;
   retry.hidden = true;
@@ -1343,35 +1360,12 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (!event.target.closest("#feed") || event.target.closest("a") || !player) return;
-  if (userPaused) {
+  if (userPaused || (muted && soundWanted)) {
     cancelPlaybackTap();
-    void togglePlayback();
+    playFromGesture(player);
     return;
   }
-  queuePlaybackTap(async () => {
-    if (muted && soundWanted) {
-      const currentPlayer = player;
-      const shouldResume = userPaused || await currentPlayer.isPaused().catch(() => false);
-      if (currentPlayer !== player) return;
-      try {
-        await currentPlayer.unmute();
-        if (currentPlayer === player) {
-          muted = await currentPlayer.isMuted();
-          if (!muted) soundUnlocked = true;
-        }
-      } catch (error) { /* браузер может запретить звук до следующего действия */ }
-      if (shouldResume && currentPlayer === player) {
-        userPaused = false;
-        playbackConfirmed = false;
-        playbackAttempts = 0;
-        playbackState("buffering");
-        watchForStall(generation);
-        await startPlayback(currentPlayer);
-      }
-      return;
-    }
-    await togglePlayback();
-  });
+  queuePlaybackTap(togglePlayback);
 });
 
 feed.addEventListener("dblclick", (event) => {
@@ -1484,7 +1478,6 @@ window.addEventListener("offline", () => {
 
 window.addEventListener("pagehide", () => {
   releasePreloads();
-  clearTimeout(qualityUpgradeTimer);
   cancelPlayerCreation(pendingMountHost);
   if (player) destroyPlayer(player).catch(() => {});
   if (cachedPrevious) destroyPlayer(cachedPrevious.player).catch(() => {});

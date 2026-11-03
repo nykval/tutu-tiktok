@@ -520,3 +520,7 @@ button, a { font-family: inherit; }
 
 .retry-button { position: absolute; z-index: 6; top: calc(50% + 45px); left: 50%; min-height: 42px; padding: 0 18px; border: 1px solid #fff; border-radius: 9px; background: #ffffffee; color: #2e234d; font-size: 13px; font-weight: 700; transform: translateX(-50%); }
 .retry-button:hover, .retry-button:focus-visible { background: #fff; outline: 2px solid #b6a5ff; }
+
+.sound-button { position: absolute; z-index: 6; top: calc(16px + env(safe-area-inset-top)); right: 16px; min-height: 44px; padding: 10px 16px; border: 1px solid #fff6; border-radius: 22px; background: #0009; color: #fff; font-size: 14px; cursor: pointer; }
+.sound-button[hidden] { display: none; }
+.status[data-kind="play-prompt"] { top: calc(48% + 88px); pointer-events: none; text-shadow: 0 1px 4px #000; }
