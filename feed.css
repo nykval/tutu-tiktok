@@ -567,3 +567,6 @@ button, a { font-family: inherit; }
 .frame.is-shared-native-play .rail,
 .frame.is-shared-native-play .dock { pointer-events: auto; }
 .frame.is-shared-native-play .first-play-button { background: radial-gradient(circle, #000 58%, transparent 60%); }
+
+/* Keep driver resets and intermediate playlist tracks behind the slide poster. */
+.frame.is-shared-switching .shared-player-slot::after { content: ""; position: absolute; inset: 0; z-index: 1; background: #111; pointer-events: none; }

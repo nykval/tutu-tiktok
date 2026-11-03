@@ -466,6 +466,8 @@ let sharedPlayer = null;
 let sharedPlayerPromise = null;
 let sharedTrackIndex = -1;
 let sharedPlaybackToken = 0;
+let sharedFrameToken = 0;
+let sharedRevealToken = 0;
 let sharedSwitchQueue = Promise.resolve();
 const preloadedNeighbors = new Map();
 let preloadTimer = 0;
@@ -779,7 +781,10 @@ function bindPlayer(instance, token) {
     if (Number.isFinite(time)) {
       lastTimeUpdateAt = Date.now();
       paintProgress(time);
-      if (!playbackConfirmed && time > previousTime + 0.01 && !userPaused && !document.hidden) markPlaying(instance, currentToken());
+      if (time > previousTime + 0.01 && !userPaused && !document.hidden) {
+        if (instance === sharedPlayer) sharedFrameToken = currentToken();
+        if (!playbackConfirmed || !hasFrame) markPlaying(instance, currentToken());
+      }
     }
   });
   if (instance.Events.Progress) instance.on(instance.Events.Progress, (event) => {
@@ -808,6 +813,20 @@ function bindPlayer(instance, token) {
     document.documentElement.dataset.playerError = String(event?.data?.error?.message || event?.data?.error || "Kinescope player error");
     failPlayback("Не удалось загрузить видео.");
   });
+}
+
+function revealSharedFrame(token) {
+  if (sharedRevealToken === token) return;
+  sharedRevealToken = token;
+  // Let the iframe compositor present its decoded frame before lifting
+  // the opaque cover. A newer swipe invalidates both animation callbacks.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (sharedRevealToken === token) sharedRevealToken = 0;
+    if (token !== generation || sharedFrameToken !== token || player !== sharedPlayer) return;
+    hasFrame = true;
+    sharedPlayerSlot.parentElement.classList.remove("is-shared-switching");
+    revealActive();
+  }));
 }
 
 function markPlaying(instance, token) {
@@ -840,7 +859,8 @@ function markPlaying(instance, token) {
   playbackAttempts = 0;
   playbackConfirmed = true;
   everPlayedCurrent = true;
-  hasFrame = true;
+  if (instance !== sharedPlayer) hasFrame = true;
+  else if (sharedFrameToken === token && !hasFrame) revealSharedFrame(token);
   playbackState(userPaused || document.hidden || !offerViewer.hidden ? "paused" : "playing");
   status.hidden = true;
   retry.hidden = true;
@@ -873,6 +893,7 @@ function offerDirectPlay(instance, token) {
   const native = FEED[active]?.source !== "upload";
   firstPlayButton.dataset.native = String(native);
   if (native) slide?.classList.add("is-gesture-required");
+  if (native && instance === sharedPlayer) sharedPlayerSlot.parentElement.classList.remove("is-shared-switching");
   sharedPlayerSlot.parentElement.classList.toggle("is-shared-native-play", native && instance === sharedPlayer);
   status.hidden = true;
   retry.hidden = true;
@@ -978,7 +999,9 @@ function show(index) {
     failedPreloads.clear();
   }
   const previous = player;
-  if (previous) previous.pause().catch(() => {});
+  // Shared playlist transitions own their pause/play calls. An old swipe
+  // must not pause a new track that is still loading inside the same iframe.
+  if (previous && previous !== sharedPlayer) previous.pause().catch(() => {});
   clearTimeout(preloadTimer);
   const cachedReturn = cachedPrevious?.index === next;
   active = next;
@@ -1011,6 +1034,8 @@ function show(index) {
 function mount(index) {
   const token = ++generation;
   sharedPlaybackToken = 0;
+  sharedFrameToken = 0;
+  sharedPlayerSlot.parentElement.classList.toggle("is-shared-switching", FEED[index]?.source !== "upload");
   sharedPlayerSlot.parentElement.classList.remove("is-shared-native-play");
   cancelPlayerCreation(pendingMountHost);
   pendingMountHost = null;
@@ -1087,6 +1112,75 @@ async function startPlayback(instance) {
   }
 }
 
+async function sharedTrackId(instance) {
+  if (typeof instance.getPlaylistItem !== "function") return null;
+  let timer;
+  try {
+    const item = await Promise.race([
+      instance.getPlaylistItem(),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), 2000); }),
+    ]);
+    return item?.id || null;
+  } catch (error) { return null; }
+  finally { clearTimeout(timer); }
+}
+
+async function moveSharedTrack(instance, direction, onTrackChanged = () => {}) {
+  const events = instance.Events;
+  // Acknowledgement of next()/previous() is not proof that the new media is
+  // loaded. Never overlap commands while the driver is replacing its source.
+  if (!events.Loaded || typeof instance.off !== "function") {
+    await (direction > 0 ? instance.next() : instance.previous());
+    onTrackChanged();
+    return;
+  }
+  let timer;
+  let changed = !events.CurrentTrackChanged;
+  const previousId = typeof instance.getPlaylistItem === "function" ? await sharedTrackId(instance) : null;
+  let disposed = false;
+  let resolveLoaded, rejectLoaded;
+  const loaded = new Promise((resolve, reject) => { resolveLoaded = resolve; rejectLoaded = reject; });
+  let recorded = false;
+  const recordChange = () => { if (!recorded) { recorded = true; onTrackChanged(); } };
+  const onChanged = () => { changed = true; recordChange(); };
+  const onLoaded = () => { if (changed) { recordChange(); resolveLoaded(); } };
+  let checking = false;
+  const onPlaybackReady = async () => {
+    if (checking) return;
+    checking = true;
+    try {
+      // Some driver versions emit Playing/TimeUpdate for playlist changes
+      // without another Loaded event. Confirm the new track in that case.
+      const id = previousId ? await sharedTrackId(instance) : null;
+      if (disposed) return;
+      if (previousId ? id && id !== previousId : changed) { recordChange(); resolveLoaded(); }
+    } catch (error) { /* the bounded deadline handles a silent driver */ }
+    finally { checking = false; }
+  };
+  const onTime = (event) => { if (event.data?.currentTime > 0) void onPlaybackReady(); };
+  const onError = () => rejectLoaded(new Error("Не удалось подготовить следующий ролик"));
+  instance.on(events.Loaded, onLoaded);
+  if (events.Playing) instance.on(events.Playing, onPlaybackReady);
+  if (events.TimeUpdate) instance.on(events.TimeUpdate, onTime);
+  if (events.CurrentTrackChanged) instance.on(events.CurrentTrackChanged, onChanged);
+  if (events.Error) instance.on(events.Error, onError);
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Переход к ролику занял слишком много времени")), 10000);
+  });
+  try {
+    const command = direction > 0 ? instance.next() : instance.previous();
+    await Promise.race([Promise.all([command, loaded]), deadline]);
+  } finally {
+    disposed = true;
+    clearTimeout(timer);
+    instance.off(events.Loaded, onLoaded);
+    if (events.Playing) instance.off(events.Playing, onPlaybackReady);
+    if (events.TimeUpdate) instance.off(events.TimeUpdate, onTime);
+    if (events.CurrentTrackChanged) instance.off(events.CurrentTrackChanged, onChanged);
+    if (events.Error) instance.off(events.Error, onError);
+  }
+}
+
 async function openSharedVideo(index, token) {
   releasePreloads();
   sharedPlayerSlot.hidden = false;
@@ -1124,9 +1218,10 @@ async function openSharedVideo(index, token) {
       const position = tracks.indexOf(sharedTrackIndex);
       const target = tracks.indexOf(index);
       const direction = target > position ? 1 : -1;
-      await (direction > 0 ? instance.next() : instance.previous());
-      sharedTrackIndex = tracks[position + direction];
-      if (awaitingFirstPlay) await instance.pause();
+      const nextIndex = tracks[position + direction];
+      await moveSharedTrack(instance, direction, () => { sharedTrackIndex = nextIndex; });
+      sharedTrackIndex = nextIndex;
+      if (awaitingFirstPlay || token !== generation) await instance.pause();
     }
     if (recoveryCount > 0) await instance.seekTo(0);
     return token === generation;
@@ -1134,6 +1229,7 @@ async function openSharedVideo(index, token) {
   sharedSwitchQueue = operation;
   if (!await operation || token !== generation) return;
   playerIndex = index;
+  observedPlayerTimes.delete(instance);
   sharedPlaybackToken = token;
   document.documentElement.dataset.player = "ready";
   document.documentElement.dataset.playerSource = "shared";

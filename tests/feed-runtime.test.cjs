@@ -48,7 +48,7 @@ function harness() {
     window: { addEventListener() {} },
     location: { hostname: "github.io", search: "" },
     navigator: { connection: { effectiveType: "4g" } },
-    URLSearchParams, console,
+    URLSearchParams, console, requestAnimationFrame(fn) { fn(); return 1; },
     setTimeout(fn, delay) { timers.set(++timerId, { fn, delay }); return timerId; },
     clearTimeout(id) { timers.delete(id); }, setInterval() { return 1; },
   });
@@ -464,4 +464,108 @@ test("forward and backward swipes reuse the authorized player, play automaticall
   assert.equal(plays, 3);
   assert.equal(mutes, 0);
   assert.equal(vm.runInContext('player === sharedPlayer', context), true);
+});
+
+
+function delayedPlaylist(context) {
+  const handlers = new Map();
+  const moves = [];
+  let plays = 0;
+  const emit = (event) => { for (const fn of [...(handlers.get(event) || [])]) fn({ data: {} }); };
+  const instance = {
+    Events: { Playing:'playing', Pause:'pause', Error:'error', Loaded:'loaded', CurrentTrackChanged:'track', TimeUpdate:'time' },
+    on(event, fn) { if (!handlers.has(event)) handlers.set(event, new Set()); handlers.get(event).add(fn); },
+    off(event, fn) { handlers.get(event)?.delete(fn); },
+    next: async () => { moves.push('next'); emit('track'); },
+    previous: async () => { moves.push('previous'); emit('track'); },
+    pause: async () => {}, unmute: async () => {}, isMuted: async () => false,
+    play: async () => { plays += 1; }, getDuration: async () => 30, getCurrentTime: async () => 0,
+  };
+  context.testPlayer = instance;
+  return { instance, emit, moves, plays: () => plays, handlers };
+}
+
+test("playlist acknowledgement does not allow an overlapping transition before Loaded", async () => {
+  const context = harness();
+  const media = delayedPlaylist(context);
+  let completed = false;
+  const pending = vm.runInContext('moveSharedTrack(testPlayer, 1)', context).then(() => { completed = true; });
+  await tick();
+  assert.equal(completed, false);
+  media.emit('loaded');
+  await pending;
+  assert.equal(completed, true);
+  assert.equal(media.handlers.get('loaded').size, 0);
+});
+
+test("two fast swipes followed by a reversal converge to the last target without overlapping loads", async () => {
+  const context = harness();
+  const media = delayedPlaylist(context);
+  context.createPlayer = async () => media.instance;
+  vm.runInContext("FEED = [{id:'one'}, {id:'two'}, {id:'three'}]; factory={create:createPlayer}; generation=1", context);
+  await vm.runInContext('openVideo(0,1)', context);
+  vm.runInContext('generation=2; sharedPlaybackToken=0; active=1', context);
+  const first = vm.runInContext('openVideo(1,2)', context);
+  await tick();
+  vm.runInContext('generation=3; sharedPlaybackToken=0; active=2', context);
+  const second = vm.runInContext('openVideo(2,3)', context);
+  await tick();
+  assert.deepEqual(media.moves, ['next']);
+  media.emit('loaded'); await tick();
+  assert.deepEqual(media.moves, ['next','next']);
+  vm.runInContext('generation=4; sharedPlaybackToken=0; active=0', context);
+  const last = vm.runInContext('openVideo(0,4)', context);
+  media.emit('loaded'); await tick();
+  assert.deepEqual(media.moves, ['next','next','previous']);
+  media.emit('loaded'); await tick();
+  assert.deepEqual(media.moves, ['next','next','previous','previous']);
+  media.emit('loaded');
+  await Promise.all([first, second, last]);
+  assert.equal(vm.runInContext('sharedTrackIndex', context), 0);
+  assert.equal(vm.runInContext('playerIndex', context), 0);
+  assert.equal(media.plays(), 2, 'only initial and latest targets are started by the feed');
+});
+
+test("Playing alone keeps the resetting iframe behind its poster until media time advances", () => {
+  const context = harness();
+  const media = delayedPlaylist(context);
+  vm.runInContext('player=testPlayer; sharedPlayer=testPlayer; generation=1; sharedPlaybackToken=1; bindPlayer(player,1); markPlaying(player,1)', context);
+  assert.equal(vm.runInContext('hasFrame', context), false);
+  for (const time of [0, 0.25]) {
+    for (const fn of media.handlers.get('time')) fn({ data: { currentTime: time } });
+  }
+  assert.equal(vm.runInContext('hasFrame', context), true);
+});
+
+test("a missing Loaded event times out and removes transition listeners", async () => {
+  const context = harness();
+  const media = delayedPlaylist(context);
+  const pending = vm.runInContext('moveSharedTrack(testPlayer,1)', context);
+  [...context.testTimers.values()].find(t => t.delay === 10000).fn();
+  await assert.rejects(pending, /слишком много времени/);
+  assert.equal(media.handlers.get('loaded').size, 0);
+  assert.equal(media.handlers.get('track').size, 0);
+});
+
+
+test("drivers that omit Loaded can confirm readiness through the new playing track", async () => {
+  const context = harness();
+  const media = delayedPlaylist(context);
+  let id = 'first';
+  media.instance.getPlaylistItem = async () => ({ id });
+  const originalNext = media.instance.next;
+  media.instance.next = async () => { await originalNext(); id = 'second'; media.emit('playing'); };
+  await vm.runInContext('moveSharedTrack(testPlayer,1)', context);
+  assert.equal(media.handlers.get('loaded').size, 0);
+});
+
+test("a queued compositor reveal cannot uncover a different video's iframe", () => {
+  const context = harness();
+  const frames = [];
+  context.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+  vm.runInContext('sharedPlayer = {}; player = sharedPlayer; generation = 1; sharedFrameToken = 1; hasFrame = false; revealSharedFrame(1)', context);
+  frames.shift()();
+  vm.runInContext('generation = 2; sharedFrameToken = 0', context);
+  frames.shift()();
+  assert.equal(vm.runInContext('hasFrame', context), false);
 });
