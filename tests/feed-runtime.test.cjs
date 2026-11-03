@@ -52,6 +52,7 @@ function harness() {
   });
   vm.runInContext(fs.readFileSync("feed.js", "utf8"), context);
   document.getElementById("offer-viewer").hidden = true;
+  vm.runInContext("awaitingFirstPlay = false", context);
   context.testTimers = timers;
   context.testSlides = slides;
   return context;
@@ -345,4 +346,43 @@ test("sound and playback are requested synchronously within the user gesture", a
   assert.deepEqual(calls, ['unmute', 'play']);
   await tick();
   assert.equal(vm.runInContext('muted', context), false);
+});
+
+
+test("opening the feed prepares a paused player without requesting autoplay", async () => {
+  const context = harness();
+  let plays = 0;
+  let options;
+  context.createPlayer = async (id, value) => {
+    options = value;
+    return {
+      Events: { Playing: 'playing', Pause: 'pause', Error: 'error' }, on() {},
+      play: async () => { plays += 1; }, pause: async () => {},
+      getCurrentTime: async () => 0, getDuration: async () => 30,
+    };
+  };
+  vm.runInContext("FEED = [{ id: 'one' }]; factory = { create: createPlayer }; awaitingFirstPlay = true; mount(0)", context);
+  await tick();
+  assert.equal(options.behavior.autoPlay, false);
+  assert.equal(plays, 0);
+  assert.equal(vm.runInContext('userPaused', context), true);
+  assert.equal(vm.runInContext('firstPlayButton.disabled', context), false);
+  assert.equal(vm.runInContext('firstPlayButton.hidden', context), false);
+  await vm.runInContext('startPlayback(player)', context);
+  assert.equal(plays, 0);
+});
+
+test("first gesture releases the opening pause and requests sound immediately", async () => {
+  const context = harness();
+  const calls = [];
+  context.instance = {
+    unmute() { calls.push('sound'); return Promise.resolve(); },
+    play() { calls.push('play'); return Promise.resolve(); },
+    isMuted: async () => false,
+  };
+  vm.runInContext('player = instance; awaitingFirstPlay = true; userPaused = true; playFromGesture(player)', context);
+  assert.deepEqual(calls, ['sound', 'play']);
+  assert.equal(vm.runInContext('awaitingFirstPlay', context), false);
+  assert.equal(vm.runInContext('firstPlayButton.hidden', context), true);
+  await tick();
 });

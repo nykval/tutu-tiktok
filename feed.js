@@ -8,6 +8,7 @@ const scrub = document.getElementById("scrub");
 const seek = document.getElementById("seek");
 const retry = document.getElementById("retry");
 const soundButton = document.getElementById("sound-button");
+const firstPlayButton = document.getElementById("first-play-button");
 const offerViewer = document.getElementById("offer-viewer");
 const offerViewerClose = document.getElementById("offer-viewer-close");
 const offerViewerFrame = document.getElementById("offer-viewer-frame");
@@ -54,6 +55,7 @@ let feedReady = false;
 let analyticsReady = false;
 let hasFrame = false;
 let userPaused = false;
+let awaitingFirstPlay = true;
 let visibilityPaused = false;
 let seeking = false;
 let currentTime = 0;
@@ -794,6 +796,7 @@ function bindPlayer(instance, token) {
 
 function markPlaying(instance, token) {
   if (token !== generation || instance !== player) return;
+  if (awaitingFirstPlay) { instance.pause().catch(() => {}); return; }
   const slide = slides()[active];
   if (slide?.classList.contains("is-gesture-required")) {
     slide.classList.remove("is-gesture-required");
@@ -901,6 +904,7 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
 }
 
 function showPlaybackError(message) {
+  firstPlayButton.hidden = true;
   delete status.dataset.kind;
   retry.textContent = "Повторить";
   releasePreloads();
@@ -994,6 +998,11 @@ function mount(index) {
   pendingMountHost = null;
   slides()[index]?.classList.remove("is-gesture-required");
   mountingIndex = index;
+  if (awaitingFirstPlay) {
+    userPaused = true;
+    firstPlayButton.hidden = false;
+    firstPlayButton.disabled = true;
+  }
   document.documentElement.dataset.playerSource = preloadedNeighbors.has(index) ? "preloaded" : cachedPrevious?.index === index ? "cached" : "new";
   delete document.documentElement.dataset.startupMs;
   delete document.documentElement.dataset.playerReadyMs;
@@ -1009,10 +1018,10 @@ function mount(index) {
   clearTimeout(playbackRetryTimer);
   clearTimeout(playbackTimeout);
   playbackTimeout = 0;
-  watchForStall(token);
   clearTimeout(bandwidthTimer);
   bandwidthTimer = 0;
-  beginBuffering(token);
+  if (awaitingFirstPlay) playbackState("paused");
+  else { watchForStall(token); beginBuffering(token); }
   openVideo(index, token)
     .catch((error) => {
       if (token !== generation) return;
@@ -1027,7 +1036,7 @@ function mount(index) {
 let startRequest = null;
 
 async function startPlayback(instance) {
-  if (userPaused || document.hidden || !offerViewer.hidden || instance !== player) return;
+  if (awaitingFirstPlay || userPaused || document.hidden || !offerViewer.hidden || instance !== player) return;
   const token = generation;
   if (startRequest?.instance === instance && startRequest.token === token) return startRequest.promise;
   if (!playbackStartedAt) playbackStartedAt = Date.now();
@@ -1117,8 +1126,8 @@ async function openVideo(index, token) {
     pendingMountHost = host;
     try {
       instance = FEED[index].source === "upload"
-        ? createLocalPlayer(host, FEED[index], token === 1 && !document.hidden)
-        : await createKinescopePlayer(host, playerOptions(FEED[index].id, token === 1 && !document.hidden), 12000);
+        ? createLocalPlayer(host, FEED[index], false)
+        : await createKinescopePlayer(host, playerOptions(FEED[index].id, false), 12000);
     } catch (error) {
       host.remove();
       throw error;
@@ -1138,6 +1147,12 @@ async function openVideo(index, token) {
   document.documentElement.dataset.player = "ready";
   document.documentElement.dataset.playerReadyMs = String(Date.now() - switchStartedAt);
   status.hidden = true;
+  if (awaitingFirstPlay) {
+    firstPlayButton.disabled = false;
+    playbackState("paused");
+    await instance.pause().catch(() => {});
+    return;
+  }
   await startPlayback(instance);
 }
 
@@ -1274,6 +1289,8 @@ async function togglePlayback() {
 function playFromGesture(instance) {
   if (!instance || instance !== player || document.hidden || !offerViewer.hidden) return;
   const token = generation;
+  awaitingFirstPlay = false;
+  firstPlayButton.hidden = true;
   userPaused = false;
   playbackAttempts = 0;
   playbackConfirmed = false;
@@ -1296,9 +1313,10 @@ function playFromGesture(instance) {
 }
 
 function updateSoundButton() {
-  soundButton.hidden = !player || !muted || !offerViewer.hidden;
+  soundButton.hidden = awaitingFirstPlay || !player || !muted || !offerViewer.hidden;
 }
 
+firstPlayButton.addEventListener("click", () => playFromGesture(player));
 soundButton.addEventListener("click", () => playFromGesture(player));
 
 function queuePlaybackTap(handler) {
@@ -1495,7 +1513,8 @@ window.addEventListener("keydown", (event) => {
   if (event.target.closest("input, textarea, select, button, a, [contenteditable]")) return;
   if (event.key === " " || event.key === "Spacebar") {
     event.preventDefault();
-    togglePlayback();
+    if (userPaused || awaitingFirstPlay) playFromGesture(player);
+    else togglePlayback();
     return;
   }
   if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
