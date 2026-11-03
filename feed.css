@@ -532,3 +532,14 @@ button, a { font-family: inherit; }
 .slide:has(> .first-play-button:not([hidden])) .playback-state { display: none; }
 
 .first-play-button[data-native="true"] { pointer-events: none; }
+
+/* The initial poster can hide the iframe, but a paused video must retain its
+   decoded frame. Only the native Play hit area is interactive through shields. */
+.slide.is-revealed.is-gesture-required .player-slot { opacity: 1; clip-path: none; z-index: 1; }
+.native-play-shield { position: absolute; z-index: 2; display: none; touch-action: pan-y; }
+.slide.is-revealed.is-gesture-required .native-play-shield { display: block; }
+.native-play-shield--top { inset: 0 0 calc(50% + 36px); }
+.native-play-shield--bottom { inset: calc(50% + 36px) 0 0; }
+.native-play-shield--left { inset: calc(50% - 36px) calc(50% + 36px) calc(50% - 36px) 0; }
+.native-play-shield--right { inset: calc(50% - 36px) 0 calc(50% - 36px) calc(50% + 36px); }
+.slide.is-revealed.is-gesture-required .first-play-button { background: radial-gradient(circle, #000 58%, transparent 60%); }

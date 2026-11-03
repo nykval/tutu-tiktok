@@ -223,6 +223,15 @@ function render() {
     slot.className = "player-slot";
     slide.appendChild(slot);
 
+    // On pause keep the iframe visible. These transparent shields route
+    // swipes to the feed while leaving its native centre Play button exposed.
+    for (const side of ["top", "bottom", "left", "right"]) {
+      const shield = document.createElement("div");
+      shield.className = `native-play-shield native-play-shield--${side}`;
+      shield.setAttribute("aria-hidden", "true");
+      slide.appendChild(shield);
+    }
+
     const shade = document.createElement("div");
     shade.className = "shade";
     slide.appendChild(shade);
