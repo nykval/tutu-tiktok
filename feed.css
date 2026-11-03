@@ -195,8 +195,7 @@ button, a { font-family: inherit; }
 .playback-state { position: absolute; z-index: 3; top: 48%; left: 50%; display: none; transform: translate(-50%, -50%); pointer-events: none; }
 .slide.is-active.is-paused .playback-state { display: block; }
 .slide.is-active.is-gesture-required .playback-state { display: none; }
-.playback-pause-icon { position: relative; display: block; width: 48px; height: 48px; border-radius: 50%; background: #0007; }
-.playback-pause-icon::after { content: ""; position: absolute; top: 14px; left: 19px; border-top: 10px solid transparent; border-bottom: 10px solid transparent; border-left: 15px solid #fff; }
+.playback-pause-icon { display: block; width: 96px; height: 96px; background: url("assets/brand/feed-play.png") center / contain no-repeat; }
 
 .shade {
   position: absolute;
