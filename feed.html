@@ -11,16 +11,19 @@
   <link rel="preload" href="assets/fonts/tutu-sans-bold.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preconnect" href="https://kinescope.io" crossorigin />
   <link rel="preconnect" href="https://player.kinescope.io" crossorigin />
-  <link rel="preload" href="https://player.kinescope.io/latest/iframe.player.js" as="script" crossorigin />
-  <link rel="stylesheet" href="feed.css?v=45" />
+  <script>
+    window.onKinescopeIframeAPIReady = window.onKinescopeIframeApiReady = function (factory) {
+      window.__kinescopeFactory = factory;
+      window.dispatchEvent(new Event("kinescope-ready"));
+    };
+  </script>
+  <script async src="https://player.kinescope.io/latest/iframe.player.js"></script>
+  <link rel="stylesheet" href="feed.css?v=46" />
 </head>
 <body>
   <main class="phone">
     <div class="frame">
       <div class="feed" id="feed" tabindex="0"></div>
-      <header class="topbar">
-        <p class="brand"><img src="assets/brand/tututiktok-logo.png" alt="ТУТУТИКТОК" /></p>
-      </header>
       <div class="scrub">
         <div class="scrub-bar"><div class="scrub-fill" id="scrub"></div><input id="seek" class="seek" type="range" min="0" max="1000" value="0" aria-label="Перемотать видео" /></div>
       </div>
@@ -36,14 +39,7 @@
       <button class="retry-button" id="retry" type="button" hidden>Повторить</button>
     </div>
   </main>
-  <script>
-    window.onKinescopeIframeAPIReady = window.onKinescopeIframeApiReady = function (factory) {
-      window.__kinescopeFactory = factory;
-      window.dispatchEvent(new Event("kinescope-ready"));
-    };
-  </script>
-  <script async src="https://player.kinescope.io/latest/iframe.player.js"></script>
   <script src="feed-data.js?v=5"></script>
-  <script src="feed.js?v=55"></script>
+  <script src="feed.js?v=58"></script>
 </body>
 </html>

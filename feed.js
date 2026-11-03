@@ -1,3 +1,4 @@
+const feedStartedAt = Date.now();
 let FEED = DEFAULT_FEED.slice();
 let feedEnabled = true;
 
@@ -46,6 +47,7 @@ let offerViewerWasPlaying = false;
 let active = 0;
 let muted = false;
 let soundWanted = true;
+let soundUnlocked = false;
 let generation = 0;
 let feedReady = false;
 let analyticsReady = false;
@@ -71,6 +73,7 @@ let playingSince = 0;
 let everPlayedCurrent = false;
 let constrainedUntil = 0;
 let playbackStartedAt = 0;
+let switchStartedAt = 0;
 
 function recordEvent(type, item = FEED[active]) {
   if (!analyticsReady || !item) return;
@@ -385,8 +388,15 @@ function openOfferViewer(url, item) {
   returnUrl.searchParams.set("video", item.id);
   returnUrl.searchParams.set("offer", "1");
   history.pushState({ ...(history.state || {}), offerViewer: true }, "", returnUrl);
-  offerViewerWasPlaying = !!player && !userPaused && document.documentElement.dataset.playback === "playing";
-  if (player && offerViewerWasPlaying) player.pause().catch(() => {});
+  offerViewerWasPlaying = !userPaused;
+  offerViewer.hidden = false;
+  releasePreloads();
+  clearTimeout(playbackTimeout);
+  playbackTimeout = 0;
+  clearTimeout(playbackRetryTimer);
+  clearTimeout(bandwidthTimer);
+  bandwidthTimer = 0;
+  if (player) player.pause().catch(() => {});
   offerViewerExternal.href = url;
   offerViewerFrame.src = url;
   offerViewer.hidden = false;
@@ -446,16 +456,48 @@ let preloadTimer = 0;
 let playerIndex = -1;
 let hostSerial = 0;
 let scrollDirection = 1;
+let pendingMountHost = null;
+let qualityUpgradeTimer = 0;
+const startupQualityPlayers = new WeakSet();
+const pendingCreations = new WeakMap();
+const playerHosts = new WeakMap();
+const destroyRequests = new WeakMap();
+
+function destroyPlayer(instance) {
+  if (!instance) return Promise.resolve();
+  if (destroyRequests.has(instance)) return destroyRequests.get(instance);
+  const request = Promise.resolve().then(() => instance.destroy()).catch(() => {}).finally(() => {
+    playerHosts.get(instance)?.remove();
+    playerHosts.delete(instance);
+  });
+  destroyRequests.set(instance, request);
+  return request;
+}
+
+function cancelPlayerCreation(host) {
+  if (!host) return;
+  pendingCreations.get(host)?.();
+}
 
 function qualityCap() {
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   if (connection?.saveData || /2g/.test(connection?.effectiveType || "")) return 360;
   if (recoveryCount || Date.now() < constrainedUntil || connection?.effectiveType === "3g") return 480;
-  return connection?.effectiveType === "4g" ? 720 : 480;
+  if (Number.isFinite(connection?.downlink) && connection.downlink > 0 && connection.downlink < 1.5) return 480;
+  return 720;
 }
 
-function mobileAutoplayMuted() {
-  return isIOS() || /Android|Mobile/i.test(navigator.userAgent || "");
+function restoreAdaptiveQuality(instance, token) {
+  clearTimeout(qualityUpgradeTimer);
+  qualityUpgradeTimer = setTimeout(() => {
+    qualityUpgradeTimer = 0;
+    if (token !== generation || instance !== player || document.hidden || userPaused || !offerViewer.hidden) return;
+    if (!playbackConfirmed || Date.now() < constrainedUntil || (Date.now() - lastBufferReportAt < 5000 && bufferedUntil - currentTime < 3)) {
+      restoreAdaptiveQuality(instance, token);
+      return;
+    }
+    instance.setVideoQuality("auto").then(() => startupQualityPlayers.delete(instance)).catch(() => {});
+  }, 6000);
 }
 
 function playerOptions(id, autoPlay = false, preload = "auto") {
@@ -464,7 +506,9 @@ function playerOptions(id, autoPlay = false, preload = "auto") {
     size: { width: "100%", height: "100%" },
     behavior: {
       autoPlay,
-      muted: !soundWanted || (autoPlay && mobileAutoplayMuted()),
+      // Start the first video muted on desktop too: autoplay with sound may
+      // stay paused without rejecting play(), delaying fallback by seconds.
+      muted: !soundWanted || !soundUnlocked || autoPlay,
       loop: true,
       playsInline: true,
       preload,
@@ -483,8 +527,10 @@ function playerOptions(id, autoPlay = false, preload = "auto") {
 
 function createLocalPlayer(host, item, autoPlay = false, preload = "auto") {
   const video = document.createElement("video");
+  // Set the autoplay policy before assigning the source or starting a load.
+  video.muted = !soundWanted || !soundUnlocked || autoPlay;
+  video.defaultMuted = video.muted;
   video.src = item.mediaUrl;
-  video.muted = !soundWanted || (autoPlay && mobileAutoplayMuted());
   video.autoplay = autoPlay;
   video.loop = true;
   video.playsInline = true;
@@ -509,42 +555,55 @@ function createLocalPlayer(host, item, autoPlay = false, preload = "auto") {
 }
 
 function discardPreload(entry) {
-  if (!entry) return;
+  if (!entry || entry.cancelled) return;
   entry.cancelled = true;
-  if (entry.player) entry.player.destroy().catch(() => {}).finally(() => entry.host.remove());
-  else entry.host.remove();
+  if (entry.player) void destroyPlayer(entry.player);
+  else cancelPlayerCreation(entry.host);
+  // Keep a wrapper around the SDK's replaceable iframe target so cancelling
+  // an unfinished creation really removes its network-heavy document.
+  if (!entry.player) entry.host.remove();
 }
 
-async function createKinescopePlayer(hostId, options, timeoutMs) {
+async function createKinescopePlayer(host, options, timeoutMs) {
+  const target = document.createElement("div");
+  target.id = host.id + "-iframe";
+  host.appendChild(target);
   let timer = 0;
-  let expired = false;
-  const pending = factory.create(hostId, options);
+  let abandoned = false;
+  const pending = factory.create(target.id, options);
   const deadline = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      expired = true;
-      reject(new Error("Плеер не ответил вовремя"));
-    }, timeoutMs);
+    const abandon = (message) => {
+      abandoned = true;
+      host.remove();
+      const error = new Error(message);
+      if (message === "Загрузка отменена") error.name = "AbortError";
+      reject(error);
+    };
+    pendingCreations.set(host, () => abandon("Загрузка отменена"));
+    timer = setTimeout(() => abandon("Плеер не ответил вовремя"), timeoutMs);
   });
   try {
-    return await Promise.race([pending, deadline]);
+    const instance = await Promise.race([pending, deadline]);
+    playerHosts.set(instance, host);
+    return instance;
   } finally {
     clearTimeout(timer);
-    if (expired) pending.then((instance) => instance.destroy().catch(() => {})).catch(() => {});
+    pendingCreations.delete(host);
+    if (abandoned) pending.then((instance) => destroyPlayer(instance)).catch(() => {});
   }
 }
 
 async function takePreparedPlayer(entry) {
-  let timer = 0;
-  const deadline = new Promise((resolve) => {
-    timer = setTimeout(() => resolve(null), 2400);
-  });
-  try {
-    const instance = await Promise.race([entry.promise, deadline]);
-    if (!instance) discardPreload(entry);
-    return instance;
-  } finally {
-    clearTimeout(timer);
-  }
+  // Creation already has an 8s deadline. Reuse the in-flight request rather
+  // than restarting the iframe and its network downloads after 2.4s.
+  return entry.player || await entry.promise;
+}
+
+function preloadOffsets() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  const limited = connection?.saveData || /(^|slow-)2g|3g/.test(connection?.effectiveType || "") ||
+    Date.now() < constrainedUntil || (navigator.deviceMemory && navigator.deviceMemory <= 2);
+  return limited ? [scrollDirection] : [scrollDirection, scrollDirection * 2, -scrollDirection];
 }
 
 function prewarmNeighbor(offset) {
@@ -559,20 +618,20 @@ function prewarmNeighbor(offset) {
   const entry = { index, host, player: null, cancelled: false, promise: null };
   preloadedNeighbors.set(index, entry);
   const initialSoundWanted = soundWanted;
-  const preload = offset === scrollDirection ? "auto" : "metadata";
+  const preload = offset * scrollDirection > 0 ? "auto" : "metadata";
   entry.promise = (async () => {
     try {
       const instance = FEED[index].source === "upload"
         ? createLocalPlayer(host, FEED[index], false, preload)
-        : await createKinescopePlayer(hostId, playerOptions(FEED[index].id, false, preload), 8000);
+        : await createKinescopePlayer(host, playerOptions(FEED[index].id, false, preload), 8000);
       if (entry.cancelled) {
-        await instance.destroy().catch(() => {});
+        await destroyPlayer(instance).catch(() => {});
         host.remove();
         return null;
       }
       entry.player = instance;
       if (initialSoundWanted !== soundWanted) {
-        (soundWanted ? instance.unmute() : instance.mute()).catch(() => {});
+        (soundWanted && soundUnlocked ? instance.unmute() : instance.mute()).catch(() => {});
       }
       instance.on(instance.Events.Playing, () => {
         if (instance !== player) instance.pause().catch(() => {});
@@ -581,7 +640,7 @@ function prewarmNeighbor(offset) {
     } catch (error) {
       host.remove();
       if (preloadedNeighbors.get(index) === entry) preloadedNeighbors.delete(index);
-      if (!entry.cancelled) failedPreloads.add(index);
+      if (!entry.cancelled && error.name !== "AbortError") failedPreloads.add(index);
       return null;
     }
   })();
@@ -594,7 +653,7 @@ function continuePreloading(entry, token) {
   if (entry.nextToken === token) return;
   entry.nextToken = token;
   entry.promise.then(() => {
-    if (!entry.cancelled && token === generation && playbackConfirmed && !document.hidden) schedulePreload(token, 600);
+    if (!entry.cancelled && token === generation && playbackConfirmed && !document.hidden) schedulePreload(token, 150);
   });
 }
 
@@ -605,7 +664,7 @@ function prewarmNeighbors() {
     continuePreloading(pending, token);
     return;
   }
-  const offsets = scrollDirection < 0 ? [-1, 1, 2] : [1, 2, -1];
+  const offsets = preloadOffsets();
   const next = offsets.find((offset) => !hasPreparedNeighbor(active + offset) && !failedPreloads.has(active + offset));
   if (next === undefined) return;
   const entry = prewarmNeighbor(next);
@@ -621,18 +680,18 @@ function releasePreloads() {
 
 function prunePreloads(index) {
   for (const [preparedIndex, entry] of preloadedNeighbors) {
-    if (preparedIndex !== index && preparedIndex >= index - 1 && preparedIndex <= index + 2 &&
+    if (preloadOffsets().some((offset) => preparedIndex === index + offset) &&
         preparedIndex !== cachedPrevious?.index) continue;
     preloadedNeighbors.delete(preparedIndex);
     discardPreload(entry);
   }
 }
 
-function schedulePreload(token, delay = 500) {
+function schedulePreload(token, delay = 250) {
   clearTimeout(preloadTimer);
   preloadTimer = setTimeout(() => {
     preloadTimer = 0;
-    if (token !== generation || !player || !playbackConfirmed || userPaused || document.hidden) return;
+    if (token !== generation || !player || !playbackConfirmed || userPaused || document.hidden || !offerViewer.hidden) return;
     const recentBufferReport = Date.now() - lastBufferReportAt < 5000;
     const bufferAhead = bufferedUntil - currentTime;
     if (recentBufferReport && bufferAhead < 3 && Date.now() - playingSince < 5000) {
@@ -649,24 +708,23 @@ function hasPreparedNeighbor(index) {
 }
 
 function beginBuffering(token) {
-  if (token !== generation) return;
+  if (token !== generation || !offerViewer.hidden) return;
   playbackConfirmed = false;
   playbackState("buffering");
   clearTimeout(preloadTimer);
   preloadTimer = 0;
   watchForStall(token);
-  if (!bandwidthTimer) {
-    bandwidthTimer = setTimeout(() => {
-      bandwidthTimer = 0;
-      if (token === generation && !playbackConfirmed && !document.hidden) {
-        if (everPlayedCurrent) constrainedUntil = Date.now() + 30000;
-        releasePreloads();
-      }
-    }, 1200);
-  }
+  if (!bandwidthTimer) bandwidthTimer = setTimeout(() => {
+    bandwidthTimer = 0;
+    if (token === generation && !playbackConfirmed && !document.hidden) {
+      if (everPlayedCurrent) constrainedUntil = Date.now() + 30000;
+      releasePreloads();
+    }
+  }, 1800);
 }
 
 const boundPlayerTokens = new WeakMap();
+const observedPlayerTimes = new WeakMap();
 
 function bindPlayer(instance, token) {
   if (boundPlayerTokens.has(instance)) {
@@ -696,7 +754,7 @@ function bindPlayer(instance, token) {
   });
   instance.on(instance.Events.Pause, () => {
     const token = currentToken();
-    if (token !== generation) return;
+    if (token !== generation || instance !== player) return;
     if (userPaused || visibilityPaused || document.hidden) playbackState("paused");
     else if (instance === player) {
       beginBuffering(token);
@@ -705,17 +763,19 @@ function bindPlayer(instance, token) {
   });
   if (instance.Events.Waiting) instance.on(instance.Events.Waiting, () => {
     const token = currentToken();
-    if (token === generation && !userPaused && !document.hidden) {
+    if (token === generation && instance === player && !userPaused && !document.hidden) {
       beginBuffering(token);
     }
   });
   if (instance.Events.TimeUpdate) instance.on(instance.Events.TimeUpdate, (event) => {
-    if (currentToken() !== generation) return;
     const time = event.data?.currentTime ?? event.target?.currentTime;
+    const previousTime = observedPlayerTimes.get(instance);
+    if (Number.isFinite(time)) observedPlayerTimes.set(instance, time);
+    if (currentToken() !== generation || instance !== player) return;
     if (Number.isFinite(time)) {
       lastTimeUpdateAt = Date.now();
       paintProgress(time);
-      if (!playbackConfirmed && time > 0 && !userPaused && instance === player) markPlaying(instance, currentToken());
+      if (!playbackConfirmed && time > previousTime + 0.01 && !userPaused && !document.hidden) markPlaying(instance, currentToken());
     }
   });
   if (instance.Events.Progress) instance.on(instance.Events.Progress, (event) => {
@@ -734,7 +794,7 @@ function bindPlayer(instance, token) {
     }
   });
   if (instance.Events.DurationChange) instance.on(instance.Events.DurationChange, (event) => {
-    if (currentToken() !== generation) return;
+    if (currentToken() !== generation || instance !== player) return;
     const duration = event.data?.duration ?? event.target?.duration;
     if (Number.isFinite(duration) && duration > 0) currentDuration = duration;
     paintProgress();
@@ -754,7 +814,13 @@ function markPlaying(instance, token) {
     userPaused = false;
   }
   const firstConfirmation = !playbackConfirmed;
-  if (firstConfirmation) playingSince = Date.now();
+  if (firstConfirmation) {
+    playingSince = Date.now();
+    if (switchStartedAt && !everPlayedCurrent) {
+      document.documentElement.dataset.startupMs = String(playingSince - switchStartedAt);
+      if (token === 1) document.documentElement.dataset.firstPlaybackMs = String(playingSince - feedStartedAt);
+    }
+  }
   clearTimeout(playbackTimeout);
   playbackTimeout = 0;
   clearTimeout(playbackRetryTimer);
@@ -764,14 +830,16 @@ function markPlaying(instance, token) {
   playbackConfirmed = true;
   everPlayedCurrent = true;
   hasFrame = true;
-  playbackState(userPaused || document.hidden ? "paused" : "playing");
+  playbackState(userPaused || document.hidden || !offerViewer.hidden ? "paused" : "playing");
   status.hidden = true;
   retry.hidden = true;
   revealActive();
-  if (firstConfirmation && (!hasPreparedNeighbor(active + 1) || !hasPreparedNeighbor(active + 2) ||
-      !hasPreparedNeighbor(active - 1))) schedulePreload(token, recoveryCount ? 4000 : 1200);
+  if (firstConfirmation) {
+    schedulePreload(token, recoveryCount ? 2000 : 250);
+    if (startupQualityPlayers.has(instance)) restoreAdaptiveQuality(instance, token);
+  }
   refreshProgress(instance, token);
-  if (userPaused || document.hidden) instance.pause().catch(() => {});
+  if (userPaused || document.hidden || !offerViewer.hidden) instance.pause().catch(() => {});
   else instance.isMuted().then((value) => {
     if (token === generation && instance === player) {
       muted = value;
@@ -798,13 +866,15 @@ function isIOS() {
 function schedulePlaybackCheck(instance, token, delay = 1200) {
   clearTimeout(playbackRetryTimer);
   playbackRetryTimer = setTimeout(async () => {
-    if (token !== generation || instance !== player || userPaused || document.hidden) return;
+    if (token !== generation || instance !== player || userPaused || document.hidden || !offerViewer.hidden) return;
     try {
       if (!(await instance.isPaused())) {
-        if (token !== generation || instance !== player || userPaused || document.hidden) return;
+        if (token !== generation || instance !== player || userPaused || document.hidden || !offerViewer.hidden) return;
         const time = await instance.getCurrentTime();
-        if (token !== generation || instance !== player || userPaused || document.hidden) return;
-        if (Number.isFinite(time) && time > 0) {
+        if (token !== generation || instance !== player || userPaused || document.hidden || !offerViewer.hidden) return;
+        const previousTime = observedPlayerTimes.get(instance);
+        if (Number.isFinite(time)) observedPlayerTimes.set(instance, time);
+        if (Number.isFinite(time) && time > previousTime + 0.01) {
           markPlaying(instance, token);
           paintProgress(time);
           return;
@@ -817,13 +887,13 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
         return;
       }
     } catch (error) { /* плеер может ещё загружаться */ }
-    if (token !== generation || instance !== player || userPaused || document.hidden) return;
+    if (token !== generation || instance !== player || userPaused || document.hidden || !offerViewer.hidden) return;
     playbackAttempts += 1;
     if (playbackAttempts === 2 && soundWanted && !mutedAutoplayFallbackTried) {
       mutedAutoplayFallbackTried = true;
       try {
         await instance.mute();
-        if (token !== generation || instance !== player || userPaused || document.hidden) return;
+        if (token !== generation || instance !== player || userPaused || document.hidden || !offerViewer.hidden) return;
         muted = true;
       } catch (error) { /* плеер может ещё загружаться */ }
     }
@@ -843,7 +913,7 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
 function showPlaybackError(message) {
   releasePreloads();
   if (cachedPrevious) {
-    cachedPrevious.player.destroy().catch(() => {});
+    destroyPlayer(cachedPrevious.player).catch(() => {});
     cachedPrevious = null;
   }
   clearTimeout(playbackTimeout);
@@ -862,7 +932,7 @@ function failPlayback(message) {
     recoveryCount = 1;
     constrainedUntil = Date.now() + 60000;
     releasePreloads();
-    if (cachedPrevious) cachedPrevious.player.destroy().catch(() => {});
+    if (cachedPrevious) destroyPlayer(cachedPrevious.player).catch(() => {});
     cachedPrevious = null;
     status.hidden = true;
     retry.hidden = true;
@@ -877,7 +947,7 @@ function watchForStall(token) {
   if (playbackTimeout) return;
   playbackTimeout = setTimeout(() => {
     playbackTimeout = 0;
-    if (token !== generation || userPaused || document.hidden) return;
+    if (token !== generation || userPaused || document.hidden || !offerViewer.hidden) return;
     if (isIOS() && !everPlayedCurrent && player) offerDirectPlay(player, token);
     else failPlayback("Видео загружается слишком долго.");
   }, recoveryCount ? 16000 : 12000);
@@ -913,12 +983,12 @@ function show(index) {
   everPlayedCurrent = false;
   seek.value = "0";
   seek.setAttribute("aria-valuetext", "Видео загружается");
-  scrub.style.width = "0%";
+  scrub.style.transform = "scaleX(0)";
   recordEvent("view");
   slides().forEach((slide, i) => slide.classList.toggle("is-active", i === active));
   slides().forEach((slide) => slide.classList.remove("is-gesture-required"));
   loadOfferImages(active);
-  muted = !soundWanted;
+  muted = !soundWanted || !soundUnlocked;
   revealActive();
   playbackState("buffering");
   status.hidden = true;
@@ -928,8 +998,16 @@ function show(index) {
 
 function mount(index) {
   const token = ++generation;
+  cancelPlayerCreation(pendingMountHost);
+  clearTimeout(qualityUpgradeTimer);
+  pendingMountHost = null;
   slides()[index]?.classList.remove("is-gesture-required");
   mountingIndex = index;
+  document.documentElement.dataset.playerSource = preloadedNeighbors.has(index) ? "preloaded" : cachedPrevious?.index === index ? "cached" : "new";
+  delete document.documentElement.dataset.startupMs;
+  delete document.documentElement.dataset.playerReadyMs;
+  document.documentElement.dataset.player = "loading";
+  switchStartedAt = Date.now();
   playbackAttempts = 0;
   playbackStartedAt = 0;
   playbackConfirmed = false;
@@ -941,6 +1019,8 @@ function mount(index) {
   clearTimeout(playbackTimeout);
   playbackTimeout = 0;
   watchForStall(token);
+  clearTimeout(bandwidthTimer);
+  bandwidthTimer = 0;
   beginBuffering(token);
   openVideo(index, token)
     .catch((error) => {
@@ -956,7 +1036,7 @@ function mount(index) {
 let startRequest = null;
 
 async function startPlayback(instance) {
-  if (userPaused || document.hidden || instance !== player) return;
+  if (userPaused || document.hidden || !offerViewer.hidden || instance !== player) return;
   const token = generation;
   if (startRequest?.instance === instance && startRequest.token === token) return startRequest.promise;
   if (!playbackStartedAt) playbackStartedAt = Date.now();
@@ -984,7 +1064,7 @@ async function startPlayback(instance) {
       if (instance !== player) try { await instance.pause(); } catch (error) { /* ролик уже закрыт */ }
       return;
     }
-    if (instance !== player || userPaused || document.hidden) {
+    if (instance !== player || userPaused || document.hidden || !offerViewer.hidden) {
       try { await instance.pause(); } catch (error) { /* ролик уже закрыт */ }
       return;
     }
@@ -993,7 +1073,7 @@ async function startPlayback(instance) {
   try { await promise; }
   finally {
     if (startRequest?.promise === promise) startRequest = null;
-    if (token === generation && instance === player && !userPaused && !document.hidden && !playbackConfirmed) schedulePlaybackCheck(instance, token);
+    if (token === generation && instance === player && !userPaused && !document.hidden && offerViewer.hidden && !playbackConfirmed) schedulePlaybackCheck(instance, token);
   }
 }
 
@@ -1010,26 +1090,28 @@ async function openVideo(index, token) {
     player = null;
     playerIndex = -1;
     if (outgoing.index === index) {
-      try { await outgoing.player.destroy(); } catch (error) { /* повторная загрузка */ }
+      try { await destroyPlayer(outgoing.player); } catch (error) { /* повторная загрузка */ }
     } else {
-      if (cachedPrevious) cachedPrevious.player.destroy().catch(() => {});
+      if (cachedPrevious) destroyPlayer(cachedPrevious.player).catch(() => {});
       cachedPrevious = outgoing;
     }
   }
   if (token !== generation) {
     if (warmed) discardPreload(warmed);
-    if (returning) returning.player.destroy().catch(() => {});
+    if (returning) destroyPlayer(returning.player).catch(() => {});
     return;
   }
   if (cachedPrevious && Math.abs(cachedPrevious.index - index) > 1) {
-    cachedPrevious.player.destroy().catch(() => {});
+    destroyPlayer(cachedPrevious.player).catch(() => {});
     cachedPrevious = null;
   }
   prunePreloads(index);
+  pendingMountHost = warmed?.host || null;
   let instance = returning?.player || (warmed ? await takePreparedPlayer(warmed) : null);
+  if (token === generation) pendingMountHost = null;
   if (token !== generation) {
-    if (instance && !returning) await instance.destroy().catch(() => {});
-    if (returning) await returning.player.destroy().catch(() => {});
+    if (instance && !returning) await destroyPlayer(instance).catch(() => {});
+    if (returning) await destroyPlayer(returning.player).catch(() => {});
     warmed?.host.remove();
     return;
   }
@@ -1038,25 +1120,37 @@ async function openVideo(index, token) {
     const host = document.createElement("div");
     host.id = hostId;
     slides()[index].querySelector(".player-slot").appendChild(host);
+    pendingMountHost = host;
     try {
       instance = FEED[index].source === "upload"
-        ? createLocalPlayer(host, FEED[index], token === 1)
-        : await createKinescopePlayer(hostId, playerOptions(FEED[index].id, token === 1), 12000);
+        ? createLocalPlayer(host, FEED[index], token === 1 && !document.hidden)
+        : await createKinescopePlayer(host, playerOptions(FEED[index].id, token === 1 && !document.hidden), 12000);
     } catch (error) {
       host.remove();
       throw error;
     }
     if (token !== generation) {
-      await instance.destroy();
+      await destroyPlayer(instance);
       host.remove();
       return;
     }
   }
+  pendingMountHost = null;
   player = instance;
   playerIndex = index;
+  if (soundWanted && soundUnlocked) instance.unmute().catch(() => {});
   bindPlayer(instance, token);
+  if (token === 1 && typeof instance.setVideoQuality === "function") {
+    startupQualityPlayers.add(instance);
+    // Keep the first segment small; after stable playback return to ABR,
+    // retaining the network-aware upper limit configured at creation.
+    instance.setVideoQuality(Math.min(480, qualityCap())).catch(() => {});
+  } else if (startupQualityPlayers.has(instance)) {
+    instance.setVideoQuality("auto").then(() => startupQualityPlayers.delete(instance)).catch(() => {});
+  }
   refreshProgress(instance, token, true);
   document.documentElement.dataset.player = "ready";
+  document.documentElement.dataset.playerReadyMs = String(Date.now() - switchStartedAt);
   status.hidden = true;
   await startPlayback(instance);
 }
@@ -1117,16 +1211,24 @@ async function loadFeed() {
   }
   render();
   playbackState("buffering");
-  recordEvent("view");
   if (active) feed.scrollTop = active * feed.clientHeight;
   feedReady = true;
   requestAnimationFrame(() => requestAnimationFrame(fitCaptions));
   if (window.__kinescopeFactory) boot(window.__kinescopeFactory);
   else if (FEED[active].source === "upload") mount(active);
+  recordEvent("view");
 }
 
 loadFeed();
-window.addEventListener("resize", fitCaptions);
+let resizeFrame = 0;
+window.addEventListener("resize", () => {
+  if (resizeFrame) return;
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = 0;
+    if (feedReady) feed.scrollTop = active * feed.clientHeight;
+    fitCaptions();
+  });
+});
 
 let scrollFrame = 0;
 let scrollSettleTimer = 0;
@@ -1142,7 +1244,9 @@ feed.addEventListener("scroll", () => {
     scrollFrame = 0;
     const index = indexFromScroll();
     const height = feed.clientHeight || 1;
-    if (index !== active && Math.abs(feed.scrollTop - index * height) < height * 0.08) {
+    // Switch once the incoming slide owns 60% of the viewport. Hysteresis
+    // avoids toggling players when the gesture hovers around the midpoint.
+    if (index !== active && Math.abs(feed.scrollTop / height - active) >= 0.6) {
       clearTimeout(scrollSettleTimer);
       scrollSettleTimer = 0;
       show(index);
@@ -1251,7 +1355,10 @@ document.addEventListener("click", async (event) => {
       if (currentPlayer !== player) return;
       try {
         await currentPlayer.unmute();
-        if (currentPlayer === player) muted = await currentPlayer.isMuted();
+        if (currentPlayer === player) {
+          muted = await currentPlayer.isMuted();
+          if (!muted) soundUnlocked = true;
+        }
       } catch (error) { /* браузер может запретить звук до следующего действия */ }
       if (shouldResume && currentPlayer === player) {
         userPaused = false;
@@ -1289,7 +1396,7 @@ function paintProgress(time = currentTime) {
   if (Number.isFinite(time)) currentTime = time;
   if (seeking) return;
   const progress = currentDuration > 0 ? Math.max(0, Math.min(1, currentTime / currentDuration)) : 0;
-  scrub.style.width = `${progress * 100}%`;
+  scrub.style.transform = `scaleX(${progress})`;
   seek.value = String(Math.round(progress * 1000));
   seek.setAttribute("aria-valuetext", currentDuration > 0 ? `${formatTime(currentTime)} из ${formatTime(currentDuration)}` : "Видео загружается");
 }
@@ -1325,7 +1432,7 @@ seek.addEventListener("pointerdown", () => { seeking = true; });
 seek.addEventListener("input", () => {
   seeking = true;
   const progress = Number(seek.value) / 1000;
-  scrub.style.width = progress * 100 + "%";
+  scrub.style.transform = `scaleX(${progress})`;
   seek.setAttribute("aria-valuetext", currentDuration > 0 ? `${formatTime(progress * currentDuration)} из ${formatTime(currentDuration)}` : `${Math.round(progress * 100)}%`);
 });
 seek.addEventListener("change", async () => {
@@ -1377,8 +1484,10 @@ window.addEventListener("offline", () => {
 
 window.addEventListener("pagehide", () => {
   releasePreloads();
-  if (player) player.destroy().catch(() => {});
-  if (cachedPrevious) cachedPrevious.player.destroy().catch(() => {});
+  clearTimeout(qualityUpgradeTimer);
+  cancelPlayerCreation(pendingMountHost);
+  if (player) destroyPlayer(player).catch(() => {});
+  if (cachedPrevious) destroyPlayer(cachedPrevious.player).catch(() => {});
 });
 
 window.addEventListener("pageshow", (event) => {

@@ -494,7 +494,9 @@ button, a { font-family: inherit; }
 .scrub-fill {
   position: relative;
   z-index: 1;
-  width: 0%;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left;
   height: 100%;
   background: #A181FF;
   border-radius: 999px;
