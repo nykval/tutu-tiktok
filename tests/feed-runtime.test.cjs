@@ -419,3 +419,22 @@ test("settling a mobile swipe aligns the feed to a whole card", () => {
   vm.runInContext('feed.scrollTop = -50', context);
   assert.equal(vm.runInContext('indexFromScroll()', context), 0);
 });
+
+
+test("native sheet height uses the smaller visible viewport instead of the full screen", () => {
+  const context = harness();
+  const heights = [];
+  context.document.documentElement.style = { setProperty(name, value) { heights.push(value); } };
+  context.window.innerHeight = 844;
+  context.document.documentElement.clientHeight = 844;
+  context.window.visualViewport = { height: 696, scale: 1 };
+  assert.equal(vm.runInContext('updateViewportHeight()', context), true);
+  assert.deepEqual(heights, ['696px']);
+  context.window.visualViewport.height = 620;
+  vm.runInContext('updateViewportHeight()', context);
+  assert.deepEqual(heights, ['696px', '620px']);
+  context.window.visualViewport.scale = 2;
+  context.window.visualViewport.height = 310;
+  assert.equal(vm.runInContext('updateViewportHeight()', context), false);
+  assert.deepEqual(heights, ['696px', '620px']);
+});

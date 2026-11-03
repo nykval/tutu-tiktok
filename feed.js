@@ -1229,20 +1229,50 @@ async function loadFeed() {
   recordEvent("view");
 }
 
+// Native sheets and Safari toolbars can leave CSS viewport units taller
+// than the visible content area. Size the feed from the visible viewport.
+let viewportHeight = 0;
+function updateViewportHeight() {
+  const viewport = window.visualViewport;
+  if (viewport && Math.abs((viewport.scale || 1) - 1) > 0.01) return false;
+  const heights = [viewport?.height, window.innerHeight, document.documentElement.clientHeight]
+    .filter((height) => Number.isFinite(height) && height > 0);
+  if (!heights.length) return false;
+  const height = Math.floor(Math.min(...heights));
+  if (height === viewportHeight) return false;
+  viewportHeight = height;
+  document.documentElement.style.setProperty("--feed-viewport-height", `${height}px`);
+  return true;
+}
+
+updateViewportHeight();
 loadFeed();
 let resizeFrame = 0;
+let pendingViewportSync = false;
 let layoutHeight = feed.clientHeight;
-window.addEventListener("resize", () => {
+function syncFeedLayout() {
+  const index = feedReady ? indexFromScroll() : active;
+  updateViewportHeight();
+  if (feedReady && feed.clientHeight !== layoutHeight) {
+    layoutHeight = feed.clientHeight;
+    feed.scrollTop = index * layoutHeight;
+  }
+  pendingViewportSync = false;
+  fitCaptions();
+}
+function requestFeedLayout() {
   if (resizeFrame) return;
   resizeFrame = requestAnimationFrame(() => {
     resizeFrame = 0;
-    if (feedReady && feed.clientHeight !== layoutHeight) {
-      layoutHeight = feed.clientHeight;
-      feed.scrollTop = active * layoutHeight;
+    if (touchingFeed || scrollSettleTimer) {
+      pendingViewportSync = true;
+      return;
     }
-    fitCaptions();
+    syncFeedLayout();
   });
-});
+}
+window.addEventListener("resize", requestFeedLayout);
+window.visualViewport?.addEventListener("resize", requestFeedLayout);
 
 let scrollFrame = 0;
 let scrollSettleTimer = 0;
@@ -1252,6 +1282,7 @@ function settleScroll() {
   clearTimeout(scrollSettleTimer);
   scrollSettleTimer = 0;
   if (!feedReady || touchingFeed || !FEED.length) return;
+  if (pendingViewportSync) syncFeedLayout();
   const index = indexFromScroll();
   const top = index * feed.clientHeight;
   if (Math.abs(feed.scrollTop - top) > 1) {

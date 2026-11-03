@@ -53,18 +53,17 @@ html, body {
 button, a { font-family: inherit; }
 
 .phone {
-  height: 100svh;
+  height: var(--feed-viewport-height, 100svh);
   display: grid;
   place-items: center;
   background: #111;
 }
 
 .frame {
-  --feed-safe-bottom: env(safe-area-inset-bottom);
-  --feed-letterbox-inset: 0px;
+  --feed-safe-bottom: env(safe-area-inset-bottom, 0px);
   position: relative;
-  width: min(100vw, calc(100svh * 9 / 16));
-  height: 100svh;
+  width: min(100%, calc(var(--feed-viewport-height, 100svh) * 9 / 16));
+  height: 100%;
   overflow: hidden;
   background: #000;
   container-type: size;
@@ -126,13 +125,6 @@ button, a { font-family: inherit; }
   min-height: 0;
   border: 0;
   background: #fff;
-}
-
-@media (max-aspect-ratio: 9/16) {
-  .frame {
-    --feed-safe-bottom: 0px;
-    --feed-letterbox-inset: env(safe-area-inset-bottom);
-  }
 }
 
 .player-slot {
@@ -276,7 +268,7 @@ button, a { font-family: inherit; }
   position: absolute;
   z-index: 3;
   right: 4px;
-  bottom: calc(230px - var(--feed-letterbox-inset));
+  bottom: calc(230px + var(--feed-safe-bottom));
   display: flex;
   flex-direction: column;
   align-items: center;
