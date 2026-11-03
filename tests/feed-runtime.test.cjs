@@ -25,6 +25,7 @@ function harness() {
   }));
   const element = () => ({
     hidden: false, style: {}, dataset: {},
+    appendChild() {}, parentElement: { classList: classes() },
     addEventListener() {}, setAttribute() {},
     classList: classes(),
     querySelectorAll() { return slides; },
@@ -293,29 +294,27 @@ test("offer overlay prevents playback and neighbor downloads", async () => {
 });
 
 
-test("rapid mounts cancel obsolete creations and only the last player starts", async () => {
+test("rapid swipes share one creation and only switch to the latest selected track", async () => {
   const context = harness();
-  const pending = [];
-  const destroyed = [];
-  const played = [];
-  context.createPlayer = () => new Promise((resolve) => pending.push(resolve));
+  let finish;
+  let creations = 0;
+  const switched = [];
+  let plays = 0;
+  context.createPlayer = () => { creations += 1; return new Promise((resolve) => { finish = resolve; }); };
   vm.runInContext(`FEED = [{ id: 'one' }, { id: 'two' }, { id: 'three' }]; factory = { create: createPlayer };
     mount(0); mount(1); mount(2);`, context);
-  assert.equal(pending.length, 3);
-  for (const index of [1, 2, 0]) {
-    pending[index]({
-      Events: { Playing: 'playing', Pause: 'pause', Error: 'error' }, on() {},
-      play: async () => { played.push(index); },
-      destroy: async () => { destroyed.push(index); },
-      getCurrentTime: async () => 0, getDuration: async () => 30,
-    });
-  }
+  assert.equal(creations, 1);
+  finish({
+    Events: { Playing: 'playing', Pause: 'pause', Error: 'error' }, on() {},
+    next: async () => { switched.push('next'); }, previous: async () => { switched.push('previous'); },
+    unmute: async () => {}, play: async () => { plays += 1; },
+    getCurrentTime: async () => 0, getDuration: async () => 30,
+  });
   await tick();
-  assert.deepEqual(played, [2]);
-  assert.deepEqual(destroyed.sort(), [0, 1]);
+  assert.deepEqual(switched, ['next', 'next']);
+  assert.equal(plays, 1);
   assert.equal(vm.runInContext('playerIndex', context), 2);
 });
-
 
 test("unresolved play requests still expose the native Play button", async () => {
   const context = harness();
@@ -437,4 +436,32 @@ test("native sheet height uses the smaller visible viewport instead of the full 
   context.window.visualViewport.height = 310;
   assert.equal(vm.runInContext('updateViewportHeight()', context), false);
   assert.deepEqual(heights, ['696px', '620px']);
+});
+
+
+test("forward and backward swipes reuse the authorized player, play automatically, and never mute", async () => {
+  const context = harness();
+  const moves = [];
+  let creates = 0, plays = 0, mutes = 0;
+  context.createPlayer = async () => {
+    creates += 1;
+    return {
+      Events: { Playing: 'playing', Pause: 'pause', Error: 'error' }, on() {},
+      next: async () => { moves.push('next'); }, previous: async () => { moves.push('previous'); },
+      play: async () => { plays += 1; }, pause: async () => {},
+      unmute: async () => {}, mute: async () => { mutes += 1; },
+      getDuration: async () => 30, getCurrentTime: async () => 0,
+    };
+  };
+  vm.runInContext("FEED = [{id:'one'}, {id:'two'}]; factory = {create:createPlayer}; generation = 1", context);
+  await vm.runInContext('openVideo(0, 1)', context);
+  vm.runInContext('generation = 2; active = 1', context);
+  await vm.runInContext('openVideo(1, 2)', context);
+  vm.runInContext('generation = 3; active = 0', context);
+  await vm.runInContext('openVideo(0, 3)', context);
+  assert.deepEqual(moves, ['next', 'previous']);
+  assert.equal(creates, 1);
+  assert.equal(plays, 3);
+  assert.equal(mutes, 0);
+  assert.equal(vm.runInContext('player === sharedPlayer', context), true);
 });

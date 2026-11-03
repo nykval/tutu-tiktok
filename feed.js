@@ -7,7 +7,7 @@ const status = document.getElementById("status");
 const scrub = document.getElementById("scrub");
 const seek = document.getElementById("seek");
 const retry = document.getElementById("retry");
-const soundButton = document.getElementById("sound-button");
+const sharedPlayerSlot = document.getElementById("shared-player-slot");
 const firstPlayButton = document.getElementById("first-play-button");
 const offerViewer = document.getElementById("offer-viewer");
 const offerViewerClose = document.getElementById("offer-viewer-close");
@@ -67,7 +67,6 @@ let playbackRetryTimer = 0;
 let playbackTapTimer = 0;
 let playbackAttempts = 0;
 let playbackConfirmed = false;
-let mutedAutoplayFallbackTried = false;
 let recoveryCount = 0;
 let bandwidthTimer = 0;
 let bufferedUntil = 0;
@@ -206,7 +205,7 @@ function render() {
   feed.replaceChildren();
   FEED.forEach((item, index) => {
     const slide = document.createElement("section");
-    slide.className = "slide" + (index === active ? " is-active" : "");
+    slide.className = "slide" + (item.source !== "upload" ? " is-shared-player" : "") + (index === active ? " is-active" : "");
     slide.dataset.index = String(index);
 
     const img = document.createElement("img");
@@ -463,6 +462,11 @@ function playbackState(kind) {
 
 let factory = null;
 let cachedPrevious = null;
+let sharedPlayer = null;
+let sharedPlayerPromise = null;
+let sharedTrackIndex = -1;
+let sharedPlaybackToken = 0;
+let sharedSwitchQueue = Promise.resolve();
 const preloadedNeighbors = new Map();
 let preloadTimer = 0;
 let playerIndex = -1;
@@ -511,6 +515,7 @@ function playerOptions(id, autoPlay = false, preload = "auto") {
       maxAbrQuality: qualityCap(),
       keyboard: false,
       autoPause: false,
+      playlist: { autoSwitch: false, loop: false },
       localStorage: { time: false, quality: false },
     },
     ui: {
@@ -687,6 +692,7 @@ function schedulePreload(token, delay = 250) {
   clearTimeout(preloadTimer);
   preloadTimer = setTimeout(() => {
     preloadTimer = 0;
+    if (player === sharedPlayer && sharedPlayer) return;
     if (token !== generation || !player || !playbackConfirmed || userPaused || document.hidden || !offerViewer.hidden) return;
     const recentBufferReport = Date.now() - lastBufferReportAt < 5000;
     const bufferAhead = bufferedUntil - currentTime;
@@ -728,12 +734,13 @@ function bindPlayer(instance, token) {
     return;
   }
   boundPlayerTokens.set(instance, token);
-  const currentToken = () => boundPlayerTokens.get(instance);
+  const currentToken = () => instance === sharedPlayer && sharedPlaybackToken !== boundPlayerTokens.get(instance)
+    ? -1 : boundPlayerTokens.get(instance);
   if (instance.Events.VolumeChange) instance.on(instance.Events.VolumeChange, (event) => {
     if (currentToken() !== generation || instance !== player) return;
     if (typeof event.data?.muted === "boolean") {
       muted = event.data.muted;
-      updateSoundButton();
+      updateSoundState();
     }
   });
   if (instance.Events.Loaded) instance.on(instance.Events.Loaded, () => {
@@ -815,6 +822,7 @@ function markPlaying(instance, token) {
     awaitingFirstPlay = false;
     firstPlayButton.hidden = true;
     userPaused = false;
+    sharedPlayerSlot.parentElement.classList.remove("is-shared-native-play");
   }
   const firstConfirmation = !playbackConfirmed;
   if (firstConfirmation) {
@@ -846,7 +854,7 @@ function markPlaying(instance, token) {
     if (token === generation && instance === player) {
       muted = value;
       if (!value) soundUnlocked = true;
-      updateSoundButton();
+      updateSoundState();
     }
   }).catch(() => {});
 }
@@ -865,6 +873,7 @@ function offerDirectPlay(instance, token) {
   const native = FEED[active]?.source !== "upload";
   firstPlayButton.dataset.native = String(native);
   if (native) slide?.classList.add("is-gesture-required");
+  sharedPlayerSlot.parentElement.classList.toggle("is-shared-native-play", native && instance === sharedPlayer);
   status.hidden = true;
   retry.hidden = true;
   playbackState("paused");
@@ -901,14 +910,6 @@ function schedulePlaybackCheck(instance, token, delay = 1200) {
     } catch (error) { /* плеер может ещё загружаться */ }
     if (token !== generation || instance !== player || userPaused || document.hidden || !offerViewer.hidden) return;
     playbackAttempts += 1;
-    if (playbackAttempts === 2 && soundWanted && !mutedAutoplayFallbackTried) {
-      mutedAutoplayFallbackTried = true;
-      try {
-        await instance.mute();
-        if (token !== generation || instance !== player || userPaused || document.hidden || !offerViewer.hidden) return;
-        muted = true;
-      } catch (error) { /* плеер может ещё загружаться */ }
-    }
     if (playbackAttempts >= 3) {
       offerDirectPlay(instance, token);
       return;
@@ -1009,6 +1010,8 @@ function show(index) {
 
 function mount(index) {
   const token = ++generation;
+  sharedPlaybackToken = 0;
+  sharedPlayerSlot.parentElement.classList.remove("is-shared-native-play");
   cancelPlayerCreation(pendingMountHost);
   pendingMountHost = null;
   slides()[index]?.classList.remove("is-gesture-required");
@@ -1029,7 +1032,6 @@ function mount(index) {
   playbackAttempts = 0;
   playbackStartedAt = 0;
   playbackConfirmed = false;
-  mutedAutoplayFallbackTried = false;
   bufferedUntil = 0;
   lastBufferReportAt = 0;
   playingSince = 0;
@@ -1065,20 +1067,7 @@ async function startPlayback(instance) {
     try { await instance.play(); }
     catch (error) {
       if (token === generation && instance === player && error?.name === "NotAllowedError") {
-        if (soundWanted) {
-          try {
-            await instance.mute();
-            if (token !== generation || instance !== player) return;
-            muted = true;
-            await instance.play();
-          } catch (fallbackError) {
-            if (token === generation && instance === player && fallbackError?.name === "NotAllowedError") {
-              offerDirectPlay(instance, token);
-            }
-          }
-        } else {
-          offerDirectPlay(instance, token);
-        }
+        offerDirectPlay(instance, token);
       }
     }
     if (token !== generation) {
@@ -1098,8 +1087,73 @@ async function startPlayback(instance) {
   }
 }
 
+async function openSharedVideo(index, token) {
+  releasePreloads();
+  sharedPlayerSlot.hidden = false;
+  sharedPlayerSlot.parentElement.classList.add("is-shared-player-active");
+  if (player && player !== sharedPlayer) {
+    void destroyPlayer(player);
+    player = null;
+  }
+  if (cachedPrevious) { void destroyPlayer(cachedPrevious.player); cachedPrevious = null; }
+  if (!sharedPlayerPromise) {
+    const host = document.createElement("div");
+    host.id = "shared-play-" + (++hostSerial);
+    sharedPlayerSlot.appendChild(host);
+    const ids = FEED.filter((item) => item.source !== "upload").map((item) => item.id);
+    const options = playerOptions(FEED[index].id, false);
+    options.url = "https://kinescope.io/playlist?video_ids=" + ids.map(encodeURIComponent).join(",");
+    options.ui.controls = true;
+    sharedPlayerPromise = createKinescopePlayer(host, options, 12000).then((instance) => {
+      sharedPlayer = instance;
+      sharedTrackIndex = FEED.findIndex((item) => item.source !== "upload");
+      return instance;
+    }).catch((error) => { sharedPlayerPromise = null; host.remove(); throw error; });
+  }
+  const instance = await sharedPlayerPromise;
+  if (token !== generation) return;
+  player = instance;
+  bindPlayer(instance, token);
+  const operation = sharedSwitchQueue.catch(() => {}).then(async () => {
+    if (token !== generation) return false;
+    // Public embed IDs differ from the playlist's internal UUIDs. Move by
+    // playlist position, retaining the same iframe and its audio permission.
+    const tracks = FEED.map((item, i) => item.source !== "upload" ? i : -1).filter((i) => i >= 0);
+    while (sharedTrackIndex !== index) {
+      if (token !== generation) return false;
+      const position = tracks.indexOf(sharedTrackIndex);
+      const target = tracks.indexOf(index);
+      const direction = target > position ? 1 : -1;
+      await (direction > 0 ? instance.next() : instance.previous());
+      sharedTrackIndex = tracks[position + direction];
+      if (awaitingFirstPlay) await instance.pause();
+    }
+    if (recoveryCount > 0) await instance.seekTo(0);
+    return token === generation;
+  });
+  sharedSwitchQueue = operation;
+  if (!await operation || token !== generation) return;
+  playerIndex = index;
+  sharedPlaybackToken = token;
+  document.documentElement.dataset.player = "ready";
+  document.documentElement.dataset.playerSource = "shared";
+  document.documentElement.dataset.playerReadyMs = String(Date.now() - switchStartedAt);
+  status.hidden = true;
+  refreshProgress(instance, token, true);
+  if (awaitingFirstPlay) {
+    offerDirectPlay(instance, token);
+    return;
+  }
+  if (soundWanted) await instance.unmute();
+  if (token === generation) await startPlayback(instance);
+}
+
 async function openVideo(index, token) {
   if (token !== generation || (FEED[index].source !== "upload" && !factory)) return;
+  if (FEED[index].source !== "upload") return openSharedVideo(index, token);
+  sharedPlayerSlot.hidden = true;
+  sharedPlayerSlot.parentElement.classList.remove("is-shared-player-active");
+  if (player === sharedPlayer) { player = null; playerIndex = -1; }
   const returning = cachedPrevious?.index === index ? cachedPrevious : null;
   if (returning) cachedPrevious = null;
   const prepared = preloadedNeighbors.get(index);
@@ -1371,19 +1425,18 @@ function playFromGesture(instance) {
     if (token !== generation || instance !== player) return;
     muted = value;
     if (!value) soundUnlocked = true;
-    updateSoundButton();
+    updateSoundState();
   }).catch(() => {});
   Promise.resolve(playback).catch((error) => {
     if (token === generation && instance === player && error?.name === "NotAllowedError") offerDirectPlay(instance, token);
   });
 }
 
-function updateSoundButton() {
-  soundButton.hidden = awaitingFirstPlay || !player || !muted || !offerViewer.hidden;
+function updateSoundState() {
+  document.documentElement.dataset.sound = muted ? "muted" : "on";
 }
 
 firstPlayButton.addEventListener("click", () => playFromGesture(player));
-soundButton.addEventListener("click", () => playFromGesture(player));
 
 function queuePlaybackTap(handler) {
   clearTimeout(playbackTapTimer);
@@ -1565,6 +1618,7 @@ window.addEventListener("pagehide", () => {
   cancelPlayerCreation(pendingMountHost);
   if (player) destroyPlayer(player).catch(() => {});
   if (cachedPrevious) destroyPlayer(cachedPrevious.player).catch(() => {});
+  if (sharedPlayer && sharedPlayer !== player) void destroyPlayer(sharedPlayer);
 });
 
 window.addEventListener("pageshow", (event) => {
