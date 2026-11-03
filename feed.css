@@ -53,6 +53,10 @@ html, body {
 button, a { font-family: inherit; }
 
 .phone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
   height: var(--feed-viewport-height, 100svh);
   display: grid;
   place-items: center;
@@ -149,9 +153,15 @@ button, a { font-family: inherit; }
 .player-slot video {
   width: 100%;
   height: 100%;
+  margin: 0;
+  padding: 0;
   border: 0;
   display: block;
+  background: #000;
 }
+
+.player-slot > div { position: absolute; inset: 0; }
+.player-slot iframe { vertical-align: top; }
 
 .player-slot video { object-fit: cover; }
 
