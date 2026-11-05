@@ -65,6 +65,8 @@ button, a { font-family: inherit; }
 
 .frame {
   --feed-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --feed-bottom-gap: max(8px, var(--feed-safe-bottom));
+  --feed-progress-height: 4px;
   position: relative;
   width: min(100%, calc(var(--feed-viewport-height, 100svh) * 9 / 16));
   height: 100%;
@@ -278,7 +280,7 @@ button, a { font-family: inherit; }
   position: absolute;
   z-index: 3;
   right: 4px;
-  bottom: calc(230px + var(--feed-safe-bottom));
+  bottom: calc(222px + var(--feed-bottom-gap));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -303,7 +305,7 @@ button, a { font-family: inherit; }
   z-index: 3;
   left: 12px;
   right: 12px;
-  bottom: calc(28px + var(--feed-safe-bottom));
+  bottom: calc(var(--feed-bottom-gap) * 2 + var(--feed-progress-height));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -484,8 +486,8 @@ button, a { font-family: inherit; }
   z-index: 4;
   left: 14px;
   right: 14px;
-  bottom: calc(12px + var(--feed-safe-bottom));
-  height: 4px;
+  bottom: var(--feed-bottom-gap);
+  height: var(--feed-progress-height);
   pointer-events: none;
 }
 
@@ -494,7 +496,7 @@ button, a { font-family: inherit; }
   top: 0;
   left: 0;
   right: 0;
-  height: 4px;
+  height: var(--feed-progress-height);
   background: rgba(255, 255, 255, 0.38);
   border-radius: 999px;
   overflow: visible;
@@ -532,7 +534,7 @@ button, a { font-family: inherit; }
 
 .status[data-kind="play-prompt"] { top: calc(48% + 88px); pointer-events: none; text-shadow: 0 1px 4px #000; }
 
-.first-play-button { position: absolute; z-index: 6; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 72px; height: 72px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; cursor: pointer; }
+.first-play-button { position: absolute; z-index: 6; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 72px; height: 72px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 .first-play-button[hidden] { display: none; }
 .first-play-button:disabled { cursor: wait; }
 .first-play-button:focus-visible { outline: 3px solid #fff; outline-offset: 5px; }
@@ -550,7 +552,6 @@ button, a { font-family: inherit; }
 .native-play-shield--bottom { inset: calc(50% + 36px) 0 0; }
 .native-play-shield--left { inset: calc(50% - 36px) calc(50% + 36px) calc(50% - 36px) 0; }
 .native-play-shield--right { inset: calc(50% - 36px) 0 calc(50% - 36px) calc(50% + 36px); }
-.slide.is-revealed.is-gesture-required .first-play-button { background: radial-gradient(circle, #000 58%, transparent 60%); }
 
 /* Playlist playback stays in one iframe so the first native Play gesture
    also authorizes subsequent tracks without replacing its document. */
@@ -566,7 +567,6 @@ button, a { font-family: inherit; }
 .frame.is-shared-native-play .is-active .native-play-shield { display: block; pointer-events: auto; }
 .frame.is-shared-native-play .rail,
 .frame.is-shared-native-play .dock { pointer-events: auto; }
-.frame.is-shared-native-play .first-play-button { background: radial-gradient(circle, #000 58%, transparent 60%); }
 
 /* Keep driver resets and intermediate playlist tracks behind the slide poster. */
 .frame.is-shared-switching .shared-player-slot::after { content: ""; position: absolute; inset: 0; z-index: 1; background: #111; pointer-events: none; }

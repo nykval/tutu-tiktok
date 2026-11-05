@@ -65,6 +65,8 @@ const pendingProgressReads = new WeakSet();
 let playbackTimeout = 0;
 let playbackRetryTimer = 0;
 let playbackTapTimer = 0;
+let lastPlaybackTap = null;
+const DOUBLE_TAP_MS = 320;
 let playbackAttempts = 0;
 let playbackConfirmed = false;
 let recoveryCount = 0;
@@ -480,6 +482,7 @@ let sharedPlayerPromise = null;
 let sharedTrackIndex = -1;
 let sharedPlaybackToken = 0;
 let sharedFrameToken = 0;
+let sharedMediaReadyToken = 0;
 let sharedRevealToken = 0;
 let sharedSwitchQueue = Promise.resolve();
 const preloadedNeighbors = new Map();
@@ -531,7 +534,9 @@ function playerOptions(id, autoPlay = false, preload = "auto") {
       keyboard: false,
       autoPause: false,
       playlist: { autoSwitch: false, loop: false },
-      localStorage: { time: false, quality: false },
+      // Also disable remembered playlist selection: restoring a different
+      // track desynchronizes next()/previous() from the feed's active index.
+      localStorage: false,
     },
     ui: {
       language: "ru",
@@ -717,7 +722,6 @@ function schedulePreload(token, delay = 250) {
   clearTimeout(preloadTimer);
   preloadTimer = setTimeout(() => {
     preloadTimer = 0;
-    if (player === sharedPlayer && sharedPlayer) return;
     if (token !== generation || !player || !playbackConfirmed || userPaused || document.hidden || !offerViewer.hidden) return;
     const recentBufferReport = Date.now() - lastBufferReportAt < 5000;
     const bufferAhead = bufferedUntil - currentTime;
@@ -883,7 +887,12 @@ function markPlaying(instance, token) {
   playbackConfirmed = true;
   everPlayedCurrent = true;
   if (instance !== sharedPlayer) hasFrame = true;
-  else if (sharedFrameToken === token && !hasFrame) revealSharedFrame(token);
+  else {
+    // Playing belongs to the selected media only after its transition has
+    // completed. There is no need to wait for two periodic TimeUpdate events.
+    if (sharedMediaReadyToken === token) sharedFrameToken = token;
+    if (sharedFrameToken === token && !hasFrame) revealSharedFrame(token);
+  }
   playbackState(userPaused || document.hidden || !offerViewer.hidden ? "paused" : "playing");
   status.hidden = true;
   retry.hidden = true;
@@ -1016,6 +1025,8 @@ function show(index) {
   if (next === active && (player || mountingIndex === next)) {
     return;
   }
+  cancelPlaybackTap();
+  lastPlaybackTap = null;
   if (next !== active) scrollDirection = next > active ? 1 : -1;
   if (next !== active) {
     recoveryCount = 0;
@@ -1060,6 +1071,7 @@ function mount(index) {
   const token = ++generation;
   sharedPlaybackToken = 0;
   sharedFrameToken = 0;
+  sharedMediaReadyToken = 0;
   sharedPlayerSlot.parentElement.classList.toggle("is-shared-switching", FEED[index]?.source !== "upload");
   sharedPlayerSlot.parentElement.classList.remove("is-shared-native-play");
   cancelPlayerCreation(pendingMountHost);
@@ -1163,6 +1175,7 @@ async function moveSharedTrack(instance, direction, onTrackChanged = () => {}) {
   let changed = !events.CurrentTrackChanged;
   const previousId = typeof instance.getPlaylistItem === "function" ? await sharedTrackId(instance) : null;
   let disposed = false;
+  let playing = false;
   let resolveLoaded, rejectLoaded;
   const loaded = new Promise((resolve, reject) => { resolveLoaded = resolve; rejectLoaded = reject; });
   let recorded = false;
@@ -1178,7 +1191,11 @@ async function moveSharedTrack(instance, direction, onTrackChanged = () => {}) {
       // without another Loaded event. Confirm the new track in that case.
       const id = previousId ? await sharedTrackId(instance) : null;
       if (disposed) return;
-      if (previousId ? id && id !== previousId : changed) { recordChange(); resolveLoaded(); }
+      if (previousId ? id && id !== previousId : changed) {
+        playing = true;
+        recordChange();
+        resolveLoaded();
+      }
     } catch (error) { /* the bounded deadline handles a silent driver */ }
     finally { checking = false; }
   };
@@ -1195,6 +1212,7 @@ async function moveSharedTrack(instance, direction, onTrackChanged = () => {}) {
   try {
     const command = direction > 0 ? instance.next() : instance.previous();
     await Promise.race([Promise.all([command, loaded]), deadline]);
+    return playing;
   } finally {
     disposed = true;
     clearTimeout(timer);
@@ -1207,7 +1225,14 @@ async function moveSharedTrack(instance, direction, onTrackChanged = () => {}) {
 }
 
 async function openSharedVideo(index, token) {
-  releasePreloads();
+  // Neighbour iframes warm the media cache; the authorized shared iframe
+  // remains responsible for playback and sound on every track.
+  const prepared = preloadedNeighbors.get(index);
+  if (prepared) {
+    preloadedNeighbors.delete(index);
+    discardPreload(prepared);
+  }
+  prunePreloads(index);
   sharedPlayerSlot.hidden = false;
   sharedPlayerSlot.parentElement.classList.add("is-shared-player-active");
   if (player && player !== sharedPlayer) {
@@ -1221,7 +1246,7 @@ async function openSharedVideo(index, token) {
     sharedPlayerSlot.appendChild(host);
     const ids = FEED.filter((item) => item.source !== "upload").map((item) => item.id);
     const options = playerOptions(FEED[index].id, false);
-    options.url = "https://kinescope.io/playlist?video_ids=" + ids.map(encodeURIComponent).join(",");
+    options.url = "https://kinescope.io/embed/playlist?video_ids=" + ids.map(encodeURIComponent).join(",");
     sharedPlayerPromise = createKinescopePlayer(host, options, 12000).then((instance) => {
       sharedPlayer = instance;
       sharedTrackIndex = FEED.findIndex((item) => item.source !== "upload");
@@ -1237,24 +1262,27 @@ async function openSharedVideo(index, token) {
     // Public embed IDs differ from the playlist's internal UUIDs. Move by
     // playlist position, retaining the same iframe and its audio permission.
     const tracks = FEED.map((item, i) => item.source !== "upload" ? i : -1).filter((i) => i >= 0);
+    let playing = false;
     while (sharedTrackIndex !== index) {
       if (token !== generation) return false;
       const position = tracks.indexOf(sharedTrackIndex);
       const target = tracks.indexOf(index);
       const direction = target > position ? 1 : -1;
       const nextIndex = tracks[position + direction];
-      await moveSharedTrack(instance, direction, () => { sharedTrackIndex = nextIndex; });
+      playing = await moveSharedTrack(instance, direction, () => { sharedTrackIndex = nextIndex; });
       sharedTrackIndex = nextIndex;
       if (awaitingFirstPlay || token !== generation) await instance.pause();
     }
-    if (recoveryCount > 0) await instance.seekTo(0);
-    return token === generation;
+    if (recoveryCount > 0) { await instance.seekTo(0); playing = false; }
+    return token === generation ? { playing } : false;
   });
   sharedSwitchQueue = operation;
-  if (!await operation || token !== generation) return;
+  const result = await operation;
+  if (!result || token !== generation) return;
   playerIndex = index;
-  observedPlayerTimes.delete(instance);
+  observedPlayerTimes.set(instance, 0);
   sharedPlaybackToken = token;
+  sharedMediaReadyToken = token;
   document.documentElement.dataset.player = "ready";
   document.documentElement.dataset.playerSource = "shared";
   document.documentElement.dataset.playerReadyMs = String(Date.now() - switchStartedAt);
@@ -1264,7 +1292,10 @@ async function openSharedVideo(index, token) {
     offerDirectPlay(instance, token);
     return;
   }
-  if (soundWanted) await instance.unmute();
+  // next()/previous() may already have started the verified new media. Keep
+  // that signal instead of waiting for another Playing/TimeUpdate cycle.
+  if (result.playing) markPlaying(instance, token);
+  if (soundWanted && !soundUnlocked) void instance.unmute().catch(() => {});
   if (token === generation) await startPlayback(instance);
 }
 
@@ -1484,6 +1515,8 @@ feed.addEventListener("touchend", endFeedTouch, { passive: true });
 feed.addEventListener("touchcancel", endFeedTouch, { passive: true });
 feed.addEventListener("scrollend", settleScroll);
 feed.addEventListener("scroll", () => {
+  cancelPlaybackTap();
+  lastPlaybackTap = null;
   clearTimeout(scrollSettleTimer);
   scrollSettleTimer = setTimeout(settleScroll, 180);
   if (scrollFrame) return;
@@ -1497,6 +1530,7 @@ feed.addEventListener("scroll", () => {
 
 async function togglePlayback() {
   const currentPlayer = player;
+  const token = generation;
   if (!currentPlayer) return;
   try {
     if (userPaused) {
@@ -1509,7 +1543,9 @@ async function togglePlayback() {
       await startPlayback(currentPlayer);
       return;
     }
-    if (await currentPlayer.isPaused()) {
+    const paused = await currentPlayer.isPaused();
+    if (token !== generation || currentPlayer !== player) return;
+    if (paused) {
       userPaused = false;
       playbackConfirmed = false;
       playbackAttempts = 0;
@@ -1520,8 +1556,14 @@ async function togglePlayback() {
       userPaused = true;
       clearTimeout(playbackTimeout);
       playbackTimeout = 0;
+      clearTimeout(playbackRetryTimer);
+      // A regular pause uses our button. Exposing the native iframe here
+      // steals centre taps from the feed and can reveal its own pause UI.
+      firstPlayButton.dataset.native = "false";
+      firstPlayButton.hidden = false;
+      firstPlayButton.disabled = false;
+      playbackState("paused");
       await currentPlayer.pause();
-      if (currentPlayer === player) offerDirectPlay(currentPlayer, generation);
     }
   } catch (error) { showPlaybackError("Не удалось продолжить воспроизведение."); }
 }
@@ -1529,6 +1571,9 @@ async function togglePlayback() {
 function playFromGesture(instance) {
   if (!instance || instance !== player || document.hidden || !offerViewer.hidden) return;
   const token = generation;
+  slides()[active]?.classList.remove("is-gesture-required");
+  sharedPlayerSlot.parentElement.classList.remove("is-shared-native-play");
+  firstPlayButton.dataset.native = "false";
   awaitingFirstPlay = false;
   firstPlayButton.hidden = true;
   userPaused = false;
@@ -1556,19 +1601,54 @@ function updateSoundState() {
   document.documentElement.dataset.sound = muted ? "muted" : "on";
 }
 
-firstPlayButton.addEventListener("click", () => playFromGesture(player));
+firstPlayButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  handlePlaybackTap(event);
+});
 
 function queuePlaybackTap(handler) {
   clearTimeout(playbackTapTimer);
+  const token = generation;
   playbackTapTimer = window.setTimeout(() => {
     playbackTapTimer = 0;
-    void handler();
-  }, 320);
+    if (token === generation && !document.hidden && offerViewer.hidden) void handler();
+  }, DOUBLE_TAP_MS);
 }
 
 function cancelPlaybackTap() {
   clearTimeout(playbackTapTimer);
   playbackTapTimer = 0;
+}
+
+function likeFromTap(slide, event) {
+  const action = slide?.querySelector('[data-action="like"]');
+  if (!action) return;
+  if (!action.classList.contains("is-on")) setLikeState(action, true);
+  showDoubleTapLike(slide, event);
+}
+
+function handlePlaybackTap(event) {
+  const slide = event.target.closest(".slide");
+  if (!player || !slide || slide !== slides()[active]) return;
+  const now = Date.now();
+  const previous = lastPlaybackTap;
+  // Clicks are synthesized on touch screens too; do not depend on a mobile
+  // browser emitting dblclick or on both taps hitting the same DOM element.
+  if (previous && previous.slide === slide && now - previous.at <= DOUBLE_TAP_MS &&
+      Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 64) {
+    cancelPlaybackTap();
+    lastPlaybackTap = null;
+    event.preventDefault();
+    likeFromTap(slide, event);
+    return;
+  }
+  lastPlaybackTap = { slide, at: now, x: event.clientX, y: event.clientY };
+  if (userPaused || (muted && soundWanted)) {
+    cancelPlaybackTap();
+    playFromGesture(player);
+    return;
+  }
+  queuePlaybackTap(togglePlayback);
 }
 
 retry.addEventListener("click", () => {
@@ -1603,6 +1683,8 @@ document.addEventListener("click", async (event) => {
     // Action buttons must never bubble into the feed playback handler.
     event.preventDefault();
     event.stopPropagation();
+    cancelPlaybackTap();
+    lastPlaybackTap = null;
     const kind = action.dataset.action;
     if (kind === "like") {
       const on = action.classList.toggle("is-on");
@@ -1617,23 +1699,13 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (!event.target.closest("#feed") || event.target.closest("a, input, button") || !player) return;
-  if (userPaused || (muted && soundWanted)) {
-    cancelPlaybackTap();
-    playFromGesture(player);
-    return;
-  }
-  queuePlaybackTap(togglePlayback);
+  handlePlaybackTap(event);
 });
 
 feed.addEventListener("dblclick", (event) => {
-  if (event.target.closest("[data-action], a, input, button")) return;
-  const slide = event.target.closest(".slide");
-  const action = slide?.querySelector('[data-action="like"]');
-  if (!slide || !action) return;
+  if (event.target.closest("[data-action], a, input, button:not(.first-play-button)")) return;
   event.preventDefault();
   cancelPlaybackTap();
-  if (!action.classList.contains("is-on")) setLikeState(action, true);
-  showDoubleTapLike(slide, event);
 });
 
 function formatTime(seconds) {

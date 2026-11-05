@@ -43,13 +43,14 @@ function harness() {
   };
   const timers = new Map();
   let timerId = 0;
+  const schedule = (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; };
   const context = vm.createContext({
     DEFAULT_FEED: [], document,
-    window: { addEventListener() {} },
+    window: { addEventListener() {}, setTimeout: schedule },
     location: { hostname: "github.io", search: "" },
     navigator: { connection: { effectiveType: "4g" } },
     URLSearchParams, console, requestAnimationFrame(fn) { fn(); return 1; },
-    setTimeout(fn, delay) { timers.set(++timerId, { fn, delay }); return timerId; },
+    setTimeout: schedule,
     clearTimeout(id) { timers.delete(id); }, setInterval() { return 1; },
   });
   vm.runInContext(fs.readFileSync("feed.js", "utf8"), context);
@@ -364,6 +365,8 @@ test("opening the feed prepares a paused player without requesting autoplay", as
   vm.runInContext("FEED = [{ id: 'one' }]; factory = { create: createPlayer }; awaitingFirstPlay = true; mount(0)", context);
   await tick();
   assert.equal(options.behavior.autoPlay, false);
+  assert.equal(options.behavior.localStorage, false, 'saved playlist selection must not override the feed order');
+  assert.equal(options.url, 'https://kinescope.io/embed/playlist?video_ids=one');
   assert.equal(plays, 0);
   assert.equal(vm.runInContext('userPaused', context), true);
   assert.equal(vm.runInContext('firstPlayButton.disabled', context), false);
@@ -555,8 +558,24 @@ test("drivers that omit Loaded can confirm readiness through the new playing tra
   media.instance.getPlaylistItem = async () => ({ id });
   const originalNext = media.instance.next;
   media.instance.next = async () => { await originalNext(); id = 'second'; media.emit('playing'); };
-  await vm.runInContext('moveSharedTrack(testPlayer,1)', context);
+  assert.equal(await vm.runInContext('moveSharedTrack(testPlayer,1)', context), true);
   assert.equal(media.handlers.get('loaded').size, 0);
+});
+
+test("Playing during a verified transition is retained when the shared player is rebound", async () => {
+  const context = harness();
+  const media = delayedPlaylist(context);
+  let id = 'first';
+  media.instance.getPlaylistItem = async () => ({ id });
+  const originalNext = media.instance.next;
+  media.instance.next = async () => { await originalNext(); id = 'second'; media.emit('playing'); };
+  context.createPlayer = async () => media.instance;
+  vm.runInContext("FEED=[{id:'one'},{id:'two'}]; factory={create:createPlayer}; generation=1", context);
+  await vm.runInContext('openVideo(0,1)', context);
+  vm.runInContext('generation=2; sharedPlaybackToken=0; active=1; hasFrame=false; playbackConfirmed=false', context);
+  await vm.runInContext('openVideo(1,2)', context);
+  assert.equal(vm.runInContext('playbackConfirmed', context), true);
+  assert.equal(vm.runInContext('hasFrame', context), true);
 });
 
 test("a queued compositor reveal cannot uncover a different video's iframe", () => {
@@ -604,4 +623,80 @@ test("a late seek response cannot overwrite progress after swiping to another tr
   finish(); await pending;
   assert.equal(vm.runInContext('currentTime', context), 3);
   assert.equal(vm.runInContext('seeking', context), false);
+});
+
+
+test("regular pause keeps centre taps in the feed and its Play button resumes immediately", async () => {
+  const context = harness();
+  let pauses = 0, plays = 0;
+  context.instance = {
+    isPaused: async () => false,
+    pause: async () => { pauses += 1; },
+    play: async () => { plays += 1; },
+    unmute: async () => {}, isMuted: async () => false,
+  };
+  vm.runInContext("FEED=[{id:'one'}]; player=instance; sharedPlayer=instance; generation=1", context);
+  await vm.runInContext('togglePlayback()', context);
+  assert.equal(pauses, 1);
+  assert.equal(vm.runInContext('firstPlayButton.hidden', context), false);
+  assert.equal(vm.runInContext('firstPlayButton.dataset.native', context), 'false');
+  assert.equal(context.testSlides[0].classList.contains('is-gesture-required'), false);
+  vm.runInContext('playFromGesture(player)', context);
+  assert.equal(plays, 1);
+  assert.equal(vm.runInContext('userPaused', context), false);
+});
+
+function tapFixture(context) {
+  const slide = context.testSlides[0];
+  const bursts = [];
+  let likes = 0;
+  slide.appendChild = burst => bursts.push(burst);
+  slide.getBoundingClientRect = () => ({ left: 100, top: 20 });
+  slide.querySelector = () => ({ classList: { contains: () => false } });
+  context.tap = { target: { closest: () => slide }, clientX: 160, clientY: 220, preventDefault() {} };
+  context.document.createElement = () => ({ classList: { add() {} }, style: {}, setAttribute() {}, remove() {} });
+  context.countLike = () => { likes += 1; };
+  vm.runInContext('setLikeState = countLike; player={}; muted=false; generation=1;', context);
+  return { bursts, likes: () => likes };
+}
+
+test("two touch-style clicks like at the tap position without requesting a pause or requiring dblclick", () => {
+  const context = harness();
+  const taps = tapFixture(context);
+  vm.runInContext('handlePlaybackTap(tap); handlePlaybackTap(tap)', context);
+  assert.equal(taps.likes(), 1);
+  assert.equal(taps.bursts.length, 1);
+  assert.equal(taps.bursts[0].style.left, '60px');
+  assert.equal(taps.bursts[0].style.top, '200px');
+  assert.equal([...context.testTimers.values()].some(t => t.delay === 320), false);
+  assert.equal(vm.runInContext('userPaused', context), false);
+});
+
+test("a delayed single tap cannot pause the next video after a swipe", async () => {
+  const context = harness();
+  tapFixture(context);
+  let pauses = 0;
+  context.instance = { isPaused: async () => false, pause: async () => { pauses += 1; } };
+  vm.runInContext('player=instance; handlePlaybackTap(tap)', context);
+  const timer = [...context.testTimers.values()].find(t => t.delay === 320);
+  vm.runInContext('generation=2; active=1', context);
+  timer.fn();
+  await tick();
+  assert.equal(pauses, 0);
+});
+
+test("shared playback preloads neighbours instead of skipping the preload scheduler", () => {
+  const context = harness();
+  let warms = 0;
+  context.warm = () => { warms += 1; };
+  vm.runInContext('prewarmNeighbors=warm; player={}; sharedPlayer=player; playbackConfirmed=true; schedulePreload(generation)', context);
+  [...context.testTimers.values()].find(t => t.delay === 250).fn();
+  assert.equal(warms, 1);
+});
+
+test("a ready shared track reveals on Playing without waiting for periodic time events", () => {
+  const context = harness();
+  context.instance = { isMuted: async () => false, getCurrentTime: async () => 0, getDuration: async () => 30 };
+  vm.runInContext('player=instance; sharedPlayer=instance; generation=1; sharedMediaReadyToken=1; markPlaying(player,1)', context);
+  assert.equal(vm.runInContext('hasFrame', context), true);
 });
