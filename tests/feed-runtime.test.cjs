@@ -145,15 +145,15 @@ test("second forward video preloads media, including when scrolling backwards", 
       prewarmNeighbor(direction * 2);
     `, context);
     await tick();
-    assert.equal(options[0].behavior.preload, "auto");
+    assert.equal(options[0].behavior.preload, true);
   }
 });
 
 test("preload depth respects data saving, memory and scroll direction", () => {
   const context = harness();
-  assert.deepEqual(Array.from(vm.runInContext("preloadOffsets()", context)), [1, 2, -1]);
+  assert.deepEqual(Array.from(vm.runInContext("preloadOffsets()", context)), [1, -1, 2]);
   vm.runInContext("scrollDirection = -1", context);
-  assert.deepEqual(Array.from(vm.runInContext("preloadOffsets()", context)), [-1, -2, 1]);
+  assert.deepEqual(Array.from(vm.runInContext("preloadOffsets()", context)), [-1, 1, -2]);
   for (const setting of ["navigator.connection.saveData = true", "navigator.connection = { effectiveType: '3g' }", "navigator.connection = {}; navigator.deviceMemory = 2"]) {
     vm.runInContext(setting, context);
     assert.deepEqual(Array.from(vm.runInContext("preloadOffsets()", context)), [-1]);
@@ -699,4 +699,60 @@ test("a ready shared track reveals on Playing without waiting for periodic time 
   context.instance = { isMuted: async () => false, getCurrentTime: async () => 0, getDuration: async () => 30 };
   vm.runInContext('player=instance; sharedPlayer=instance; generation=1; sharedMediaReadyToken=1; markPlaying(player,1)', context);
   assert.equal(vm.runInContext('hasFrame', context), true);
+});
+
+
+test("a buffered neighbour is played in its existing iframe without creating or switching a player", async () => {
+  const context = harness();
+  let plays = 0, sharedPauses = 0, destroys = 0;
+  context.prepared = {
+    Events: { Playing:'playing', Pause:'pause', Error:'error' }, on() {},
+    play: async () => { plays += 1; }, unmute: async () => {},
+    getDuration: async () => 30, getCurrentTime: async () => 0,
+    destroy: async () => { destroys += 1; },
+  };
+  context.authorized = { pause: async () => { sharedPauses += 1; } };
+  vm.runInContext(`FEED=[{id:'one'},{id:'two'}]; factory={}; active=1; generation=2;
+    player=authorized; sharedPlayer=authorized; soundUnlocked=true;
+    preloadedNeighbors.set(1,{index:1,player:prepared,ready:true,host:{remove(){}}});`, context);
+  await vm.runInContext('openVideo(1,2)', context);
+  assert.equal(plays, 1);
+  assert.equal(sharedPauses, 1);
+  assert.equal(destroys, 0);
+  assert.equal(vm.runInContext('player===prepared', context), true);
+  assert.equal(vm.runInContext('preloadedNeighbors.has(1)', context), false);
+  assert.equal(vm.runInContext('sharedPlayerSlot.hidden', context), true);
+});
+
+test("preloaded iframe creation is not mistaken for buffered media", async () => {
+  const context = harness();
+  const handlers = {};
+  context.createPlayer = async () => ({
+    Events:{Loaded:'loaded',Playing:'playing'},
+    on(event, fn) { handlers[event] = fn; },
+  });
+  vm.runInContext("FEED=[{id:'one'},{id:'two'}]; factory={create:createPlayer}; prewarmNeighbor(1)", context);
+  await tick();
+  assert.equal(vm.runInContext('canUsePreparedPlayer(1)', context), false);
+  handlers.loaded();
+  assert.equal(vm.runInContext('canUsePreparedPlayer(1)', context), true);
+});
+
+test("iOS and browsers that blocked a prepared player keep the authorized shared iframe", () => {
+  const context = harness();
+  vm.runInContext("preloadedNeighbors.set(1,{ready:true}); navigator.userAgent='iPhone'", context);
+  assert.equal(vm.runInContext('canUsePreparedPlayer(1)', context), false);
+  vm.runInContext("navigator.userAgent='Chrome'; preferSharedPlayback=true", context);
+  assert.equal(vm.runInContext('canUsePreparedPlayer(1)', context), false);
+});
+
+test("blocked sound on a prepared player falls back automatically instead of asking for another Play tap", () => {
+  const context = harness();
+  let mounts = 0;
+  context.remount = () => { mounts += 1; };
+  vm.runInContext("FEED=[{id:'one'}]; player={}; sharedPlayer={}; mount=remount; offerDirectPlay(player,generation)", context);
+  assert.equal(mounts, 1);
+  assert.equal(vm.runInContext('preferSharedPlayback', context), true);
+  assert.equal(vm.runInContext('userPaused', context), false);
+  assert.equal(context.testSlides[0].classList.contains('is-gesture-required'), false);
 });

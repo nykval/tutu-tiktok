@@ -485,6 +485,7 @@ let sharedFrameToken = 0;
 let sharedMediaReadyToken = 0;
 let sharedRevealToken = 0;
 let sharedSwitchQueue = Promise.resolve();
+let preferSharedPlayback = false;
 const preloadedNeighbors = new Map();
 let preloadTimer = 0;
 let playerIndex = -1;
@@ -634,7 +635,7 @@ function preloadOffsets() {
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   const limited = connection?.saveData || /(^|slow-)2g|3g/.test(connection?.effectiveType || "") ||
     Date.now() < constrainedUntil || (navigator.deviceMemory && navigator.deviceMemory <= 2);
-  return limited ? [scrollDirection] : [scrollDirection, scrollDirection * 2, -scrollDirection];
+  return limited ? [scrollDirection] : [scrollDirection, -scrollDirection, scrollDirection * 2];
 }
 
 function prewarmNeighbor(offset) {
@@ -646,7 +647,7 @@ function prewarmNeighbor(offset) {
   const host = document.createElement("div");
   host.id = hostId;
   slides()[index].querySelector(".player-slot").appendChild(host);
-  const entry = { index, host, player: null, cancelled: false, promise: null };
+  const entry = { index, host, player: null, ready: false, cancelled: false, promise: null };
   preloadedNeighbors.set(index, entry);
   const initialSoundWanted = soundWanted;
   const preload = offset * scrollDirection > 0 ? "auto" : "metadata";
@@ -654,13 +655,18 @@ function prewarmNeighbor(offset) {
     try {
       const instance = FEED[index].source === "upload"
         ? createLocalPlayer(host, FEED[index], false, preload)
-        : await createKinescopePlayer(host, playerOptions(FEED[index].id, false, preload), 8000);
+        : await createKinescopePlayer(host, playerOptions(FEED[index].id, false, true), 8000);
       if (entry.cancelled) {
         await destroyPlayer(instance).catch(() => {});
         host.remove();
         return null;
       }
       entry.player = instance;
+      // Creating the iframe alone does not mean video data is buffered.
+      // Loaded confirms that the driver has media ready for playback.
+      if (instance.Events.Loaded) instance.on(instance.Events.Loaded, () => {
+        if (!entry.cancelled) entry.ready = true;
+      });
       if (initialSoundWanted !== soundWanted) {
         (soundWanted && soundUnlocked ? instance.unmute() : instance.mute()).catch(() => {});
       }
@@ -905,6 +911,7 @@ function markPlaying(instance, token) {
   else instance.isMuted().then((value) => {
     if (token === generation && instance === player) {
       muted = value;
+      if (value && soundWanted && !userPaused && fallBackToSharedPlayer(instance)) return;
       if (!value) soundUnlocked = true;
       updateSoundState();
     }
@@ -913,6 +920,7 @@ function markPlaying(instance, token) {
 
 function offerDirectPlay(instance, token) {
   if (token !== generation || instance !== player) return;
+  if (fallBackToSharedPlayer(instance)) return;
   userPaused = true;
   clearTimeout(playbackTimeout);
   playbackTimeout = 0;
@@ -930,6 +938,19 @@ function offerDirectPlay(instance, token) {
   status.hidden = true;
   retry.hidden = true;
   playbackState("paused");
+}
+
+function fallBackToSharedPlayer(instance) {
+  if (awaitingFirstPlay || instance !== player || instance === sharedPlayer ||
+      FEED[active]?.source === "upload" || !sharedPlayer) return false;
+  // Some browsers authorize sound for only the iframe that received the
+  // opening gesture. Keep that iframe as an automatic fallback for the feed.
+  preferSharedPlayback = true;
+  userPaused = false;
+  hasFrame = false;
+  revealActive();
+  mount(active);
+  return true;
 }
 
 function isIOS() {
@@ -1233,6 +1254,7 @@ async function openSharedVideo(index, token) {
     discardPreload(prepared);
   }
   prunePreloads(index);
+  slides()[index]?.classList.add("is-shared-player");
   sharedPlayerSlot.hidden = false;
   sharedPlayerSlot.parentElement.classList.add("is-shared-player-active");
   if (player && player !== sharedPlayer) {
@@ -1301,10 +1323,15 @@ async function openSharedVideo(index, token) {
 
 async function openVideo(index, token) {
   if (token !== generation || (FEED[index].source !== "upload" && !factory)) return;
-  if (FEED[index].source !== "upload") return openSharedVideo(index, token);
+  if (FEED[index].source !== "upload" && !canUsePreparedPlayer(index)) return openSharedVideo(index, token);
+  slides()[index]?.classList.remove("is-shared-player");
   sharedPlayerSlot.hidden = true;
   sharedPlayerSlot.parentElement.classList.remove("is-shared-player-active");
-  if (player === sharedPlayer) { player = null; playerIndex = -1; }
+  if (player === sharedPlayer && sharedPlayer) {
+    void sharedPlayer.pause().catch(() => {});
+    player = null;
+    playerIndex = -1;
+  }
   const returning = cachedPrevious?.index === index ? cachedPrevious : null;
   if (returning) cachedPrevious = null;
   const prepared = preloadedNeighbors.get(index);
@@ -1376,6 +1403,13 @@ async function openVideo(index, token) {
     return;
   }
   await startPlayback(instance);
+}
+
+function canUsePreparedPlayer(index) {
+  // Safari ties unmuted autoplay to a particular media element. Retaining
+  // the shared iframe there avoids trading a faster swipe for a new Play tap.
+  if (awaitingFirstPlay || preferSharedPlayback || isIOS()) return false;
+  return cachedPrevious?.index === index || preloadedNeighbors.get(index)?.ready === true;
 }
 
 function indexFromScroll() {
